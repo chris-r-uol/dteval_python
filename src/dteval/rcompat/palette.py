@@ -76,3 +76,25 @@ def grey(level: float) -> str:
     v = int(round(level * 255))
     v = min(255, max(0, v))
     return f"#{v:02X}{v:02X}{v:02X}"
+
+
+#: R's colour names are not CSS's. Most agree, but two that DTEval uses do not,
+#: and both are visible: R's `green` is pure #00FF00 where CSS/matplotlib give
+#: the darker #008000, and R's `grey` is #BEBEBE against CSS #808080.
+#:
+#: The plot *spec* keeps R's names, because that is what R records and what the
+#: parity fixtures hold. Resolution happens at the rendering boundary instead --
+#: and any frontend drawing from `to_spec()` should resolve them through here
+#: too, or it will quietly draw a different figure.
+R_COLOUR_NAMES = {
+    "green": "#00FF00",
+    "grey": "#BEBEBE",
+    "gray": "#BEBEBE",
+}
+
+
+def resolve_colour(value):
+    """Resolve an R colour name to its hex value, leaving anything else alone."""
+    if isinstance(value, str):
+        return R_COLOUR_NAMES.get(value.lower(), value)
+    return value

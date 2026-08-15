@@ -24,7 +24,7 @@ from dteval.handlers import DTEvalError, check_tube_data, get_tube_x
 from dteval.plots.ggshell import LayerSpec, add_geom, resolve_facet, test_args, tidy_args
 from dteval.plots.quicktext import quick_text
 from dteval.rcompat.coerce import as_matrix_paste
-from dteval.rcompat.palette import hcl_hue_palette
+from dteval.rcompat.palette import hcl_hue_palette, resolve_colour
 from dteval.rcompat.stats import r_quantile
 from dteval.tagging import tag_tube_required
 
@@ -571,6 +571,10 @@ _GEOM_TO_PLOTNINE = {
     "GeomContour": "geom_contour",
     "GeomCol": "geom_col",
     "GeomVline": "geom_vline",
+    "GeomHline": "geom_hline",
+    # expand_limits() is a geom_blank layer over the corner points; tube_map
+    # relies on it to hold the basemap extent.
+    "GeomBlank": "geom_blank",
 }
 
 # plotnine spells a few ggplot2 aesthetics differently.
@@ -593,15 +597,24 @@ def _to_plotnine(plot: TubePlot):
     # matplotlib has no "transparent" colour keyword; "none" is its equivalent.
     p = p + p9.theme(strip_background=p9.element_rect(fill="none"))
 
+    flip = _needs_flip(plot)
+
     for layer in plot.layers:
-        fn = getattr(p9, _GEOM_TO_PLOTNINE[layer.geom])
+        geom = layer.geom
         mapping = {_AES_RENAME.get(k, k): v for k, v in layer.mapping.items()}
         params = {
-            _AES_RENAME.get(k, k): v
+            _AES_RENAME.get(k, k): resolve_colour(v)
             for k, v in layer.params.items()
             if k not in ("na.rm", "group")
         }
+        if flip:
+            mapping = {_FLIP_AES.get(k, k): v for k, v in mapping.items()}
+            geom = _FLIP_GEOM.get(geom, geom)
+        fn = getattr(p9, _GEOM_TO_PLOTNINE[geom])
         p = p + fn(p9.aes(**mapping), data=layer.data, **params)
+
+    if flip:
+        p = p + p9.coord_flip()
 
     p = _add_date_scales(p, plot)
     p = _add_palettes(p, plot)
@@ -614,12 +627,57 @@ def _to_plotnine(plot: TubePlot):
         else:
             p = p + p9.facet_grid(rows=plot.facet_vars[:1])
 
+    # Under coord_flip the aesthetics keep their names and only their display
+    # swaps, so the labels have to swap with the mapping to land on the right
+    # axis.
+    x_lab, y_lab = plot.labels.get("x"), plot.labels.get("y")
+    if flip:
+        x_lab, y_lab = y_lab, x_lab
     p = p + p9.labs(
-        x=_strip_markup(plot.labels.get("x")),
-        y=_strip_markup(plot.labels.get("y")),
+        x=_strip_markup(x_lab),
+        y=_strip_markup(y_lab),
         subtitle=_strip_markup(plot.labels.get("subtitle")),
     )
+
+    if plot.blank_axes:
+        # tubeMap blanks both axes: on a map the degree gridlines carry no
+        # information the basemap does not already show.
+        p = p + p9.theme(
+            axis_title_x=p9.element_blank(), axis_text_x=p9.element_blank(),
+            axis_ticks_major_x=p9.element_blank(),
+            axis_title_y=p9.element_blank(), axis_text_y=p9.element_blank(),
+            axis_ticks_major_y=p9.element_blank(),
+        )
     return p
+
+
+#: Under a flip these aesthetics trade places, and a vertical reference line
+#: has to become a horizontal one to stay on the same variable.
+_FLIP_AES = {"x": "y", "y": "x", "xintercept": "yintercept", "yintercept": "xintercept"}
+_FLIP_GEOM = {"GeomVline": "GeomHline", "GeomHline": "GeomVline"}
+
+
+def _needs_flip(plot: TubePlot) -> bool:
+    """Does this figure want horizontal bars?
+
+    ggplot2 infers a bar chart's orientation from which aesthetic is discrete,
+    so ``geom_col(aes(x = value, y = ref))`` draws horizontal bars. plotnine's
+    geom_col has no orientation parameter and always stacks vertically, so the
+    equivalent is to swap the aesthetics and flip the coordinates -- which is
+    what testTubeMeta needs to come out the way R draws it.
+    """
+    if not any(layer.geom == "GeomCol" for layer in plot.layers):
+        return False
+    for layer in plot.layers:
+        if layer.geom != "GeomCol":
+            continue
+        x, y = layer.mapping.get("x"), layer.mapping.get("y")
+        data = layer.data
+        if x in data.columns and y in data.columns:
+            return not pd.api.types.is_numeric_dtype(
+                data[y]
+            ) and pd.api.types.is_numeric_dtype(data[x])
+    return False
 
 
 def _add_date_scales(p, plot: TubePlot):
@@ -662,16 +720,21 @@ def _add_palettes(p, plot: TubePlot):
     mapped_colour = any("colour" in layer.mapping for layer in plot.layers)
     mapped_fill = any("fill" in layer.mapping for layer in plot.layers)
 
-    if plot.palette and mapped_colour:
-        if len(plot.palette) == 2 and plot.palette[0].startswith("#13"):
-            p = p + p9.scale_color_gradientn(colors=list(plot.palette))
+    palette = [resolve_colour(c) for c in plot.palette] if plot.palette else None
+    fill_palette = (
+        [resolve_colour(c) for c in plot.fill_palette] if plot.fill_palette else None
+    )
+
+    if palette and mapped_colour:
+        if len(palette) == 2 and palette[0].startswith("#13"):
+            p = p + p9.scale_color_gradientn(colors=palette)
         else:
-            p = p + p9.scale_color_manual(values=list(plot.palette))
-    if plot.fill_palette and mapped_fill:
-        if len(plot.fill_palette) == 2 and plot.fill_palette[0].startswith("#13"):
-            p = p + p9.scale_fill_gradientn(colors=list(plot.fill_palette))
+            p = p + p9.scale_color_manual(values=palette)
+    if fill_palette and mapped_fill:
+        if len(fill_palette) == 2 and fill_palette[0].startswith("#13"):
+            p = p + p9.scale_fill_gradientn(colors=fill_palette)
         else:
-            p = p + p9.scale_fill_manual(values=list(plot.fill_palette))
+            p = p + p9.scale_fill_manual(values=fill_palette)
     return p
 
 

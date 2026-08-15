@@ -13,7 +13,7 @@ gap.
 | Serialisation | `parity/serialize.R` — `%.17g` doubles (lossless), explicit R classes, factor levels, NA-vs-NaN |
 | Python side | `tests/test_parity.py` evaluates the Python expression and compares |
 | Comparison | `parity/compare.py` — floats to 1e-6, structure exact; any override requires a documented `reason` |
-| Staleness | `parity/fixtures/_lock.json` records the upstream SHA and R-source hash; `tests/test_lock.py` gates both, and CI regenerates from live R on every PR |
+| Staleness | `parity/fixtures/_lock.json` records the upstream SHA and R-source hash; `tests/test_lock.py` gates both, and CI regenerates from live R on every PR and re-checks with `parity/compare_fixtures.py` |
 
 **Numbers are compared to a relative tolerance of 1e-6; structure is compared
 exactly.**
@@ -42,6 +42,42 @@ two-pass `mean`, the FMA contraction in its `var` loop, and the need for
 hand-ported `qnorm`/`qt` — roughly 520 lines of transliteration, since removed.
 The structural findings it produced (below) were kept; they matter at any
 tolerance.
+
+### Why the CI gate is not `git diff`
+
+The obvious way to prove the committed fixtures still match live R is to
+regenerate them and run `git diff --exit-code`. That is wrong, and it took a
+CI run to make the reason concrete.
+
+Byte identity of 17-significant-digit doubles additionally requires both
+machines to agree on floating-point *accumulation*. R sums in `LDOUBLE`, so a
+build with `capabilities("long.double") == TRUE` — Linux x86_64, which is what
+the CI container is — and one without — the conda-forge macOS arm64 build the
+fixtures were generated on — differ in the last ulp of every group mean.
+Neither is wrong. This document already said the gold standard is a *specific*
+R build; the byte gate quietly assumed otherwise.
+
+So CI compares the two fixture sets under the contract the project actually
+makes: **structure exactly, numbers to 1e-6**
+(`parity/compare_fixtures.py`). That is stronger than byte equality where it
+counts — a changed column, a lost factor level, a reordered row or a genuinely
+shifted value all fail — and it does not fail for a last digit no diffusion
+tube could resolve. A byte-level `git diff --stat` still runs alongside it, as
+information rather than a gate.
+
+Two things that comparison has to do for itself, because the loaded pandas
+Series cannot carry them:
+
+- **`NA_real_` vs `NaN`.** `load_column` maps both to `float64` nan, since that
+  is all pandas has. The distinction survives only in the serialised token, so
+  the tokens are compared as text.
+- **Factor levels and their order, character NA positions, POSIXct `tzone`.**
+  These sit beside `values` in the node and are compared exactly.
+
+`_lock.json` and `_shims.json` are excluded: they record R package versions and
+which shims were needed, which legitimately differ per machine. The parts of
+them that must not drift — the upstream SHA and the R-source hash — are gated
+by `tests/test_lock.py` instead.
 
 ## Pinned environment
 

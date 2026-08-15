@@ -268,12 +268,30 @@ def _named_map(values, names) -> dict[str, str]:
     return dict(zip(keys, vals, strict=False))
 
 
+def canonicalise(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    """Stably sort a frame by ``columns`` so row order stops mattering.
+
+    Used only where R's own row order is an internal artifact we do not
+    reproduce -- see the `row_order_artifact` field in parity/manifest.yaml.
+    Everything else is compared in R's order.
+    """
+    present = [c for c in columns if c in df.columns]
+    if not present:
+        return df.reset_index(drop=True)
+    keys = pd.DataFrame(
+        {c: df[c].astype(object).map(lambda v: "" if pd.isna(v) else str(v)) for c in present}
+    )
+    order = keys.sort_values(present, kind="stable").index
+    return df.loc[order].reset_index(drop=True)
+
+
 def compare(
     case_id: str,
     got: Any,
     fixture: dict,
     tol: float | None = None,
     tol_columns: list[str] | None = None,
+    row_order_artifact: list[str] | None = None,
 ) -> Report:
     """Compare a Python result against a loaded fixture payload.
 
@@ -290,6 +308,9 @@ def compare(
         return rep
 
     exp = load_value(node)
+    if row_order_artifact and isinstance(exp, pd.DataFrame) and isinstance(got, pd.DataFrame):
+        exp = canonicalise(exp, row_order_artifact)
+        got = canonicalise(got, row_order_artifact)
     _compare_any(exp, got, "$", rep, tol, cols)
     return rep
 

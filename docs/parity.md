@@ -167,6 +167,37 @@ DTEval calls `qt(0.025, df = n - 1, lower.tail = FALSE)` where `n` is the
 replicate count, so the default `n = 3` gives `df = 2` and is exact. Worst
 measured deviation elsewhere is 5 ulps at `df = 1.5`.
 
+### `tube_in_xy_polygon` — row order within a coordinate group
+
+Values, columns and column order are exact. Only the relative order of rows
+sharing an *identical* coordinate pair is not reproduced, so the comparison
+canonicalises row order first (`row_order_artifact` in the manifest).
+
+R's `merge()` is stable for small inputs but not at this scale: one 11,273-row
+coordinate group comes back as rows 9550, 9549, 3392, 195, … because
+`merge.data.frame`'s within-tie order comes from the C `do_merge` index rather
+than from a stable sort. That is an internal artifact, not a documented output,
+and since every tube shares its location with its own replicates nothing
+downstream depends on it — callers group or sort anyway. Reproducing it would
+mean porting R's C merge.
+
+Worth noting the canonicalisation *found* a real bug rather than hiding one:
+with row-order noise removed, `in.caz` disagreed on 7,675 rows. The cause was
+that `caz.brd` is a `MULTILINESTRING` and `tubeInXYPolygon` casts it with
+`st_cast(..., "MULTIPOLYGON")` before testing — without that cast a
+point-in-polygon test against a *line* is always false, silently marking every
+tube as outside the zone.
+
+### `tube_summary_lat_lon` — temporary tolerance on `distance.m`
+
+`distance.m` comes from `aqeval.find_near_lat_lon`. The currently installed
+build groups the Haversine terms differently from R AQEval, giving a worst-case
+disagreement of 6.5e-10 m over 1,884 real site pairs. The fix
+(`aqeval_python` branch `fix/haversine-r-parity`) makes all 1,884 exact.
+
+**This tolerance should be deleted once that fix is installed**, at which point
+the case is bit-exact. Row order and every other column already are.
+
 ### `fit_tube_model_gam` — not bit-exact
 
 `mgcv::gam` with `te()` tensor smooths and GCV/REML smoothing-parameter

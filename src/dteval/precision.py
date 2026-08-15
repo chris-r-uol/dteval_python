@@ -18,6 +18,7 @@ from dteval.loess import r_loess
 from dteval.plots.ggshell import add_geom, tidy_args
 from dteval.plots.tube_plot import TubePlot, tube_plot
 from dteval.rcompat.collate import r_sort, r_unique
+from dteval.rcompat.merge import r_merge
 from dteval.rcompat.numfmt import as_character, signif
 from dteval.rcompat.stats import is_finite, qnorm, qt, r_mean, r_quantile, r_sd
 from dteval.tagging import tag_tube, tag_tube_required
@@ -132,7 +133,9 @@ def _one_cut(part: pd.DataFrame, cut: str, by_cols: list[str], method: int, n: i
     """Compute replicate statistics and LOESS bounds for one ``.cut`` subset."""
     stats = _replicate_stats(part, by_cols, method)
 
-    merged = _r_merge(part, stats, by_cols)
+    # R merges without `by=`, so the join columns are inferred as
+    # intersect(names(part), names(stats)) -- in part's column order.
+    merged = r_merge(part, stats)
 
     merged = merged[merged[".n"] == n]
     merged = merged[~merged[".tube"].isna()].reset_index(drop=True)
@@ -177,42 +180,6 @@ def _one_cut(part: pd.DataFrame, cut: str, by_cols: list[str], method: int, n: i
         f" to {_sig(r_mean(((high - mean) / mean) * 100, na_rm=True))}[%]"
     )
     return merged, lookup, report
-
-
-def _r_merge(x: pd.DataFrame, y: pd.DataFrame, by: list[str]) -> pd.DataFrame:
-    """Base R's ``merge(x, y)`` -- column order and, crucially, row order.
-
-    Two behaviours that pandas does not share:
-
-    * the join columns come **first** in the result, then x's remaining
-      columns, then y's; and
-    * the result is sorted on the join key **as text**. ``merge.data.frame``
-      pastes the by-columns into one ``"\\r"``-separated string and orders on
-      that, so a numeric key sorts lexicographically: ``.sample_id`` runs
-      1, 1151, 1199, ... and 48 lands after 1425, not second.
-
-    Getting this wrong reorders every row of ``testTubePrecision``'s output.
-
-    Note also that R is called without ``by=``, so the join columns are
-    ``intersect(names(x), names(y))`` -- ordered by where they sit in **x**,
-    not by the order the caller happened to build them in. With
-    ``facet = ".year"`` that puts ``.year`` ahead of ``.cut``.
-    """
-    by = [c for c in x.columns if c in set(by) & set(y.columns)]
-
-    out = x.merge(y, on=by, how="inner")
-    rest_x = [c for c in x.columns if c not in by]
-    rest_y = [c for c in y.columns if c not in by]
-    out = out[[*by, *rest_x, *rest_y]]
-
-    from dteval.rcompat.coerce import as_character_series
-
-    key = None
-    for col in by:
-        part = as_character_series(out[col]).fillna("NA")
-        key = part if key is None else key + "\r" + part
-    order = np.argsort(np.asarray(key, dtype=object), kind="stable")
-    return out.iloc[order].reset_index(drop=True)
 
 
 def _sig(value: float) -> str:

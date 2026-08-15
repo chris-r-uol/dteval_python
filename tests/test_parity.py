@@ -56,7 +56,14 @@ def test_parity(case: dict) -> None:
     except (AttributeError, NotImplementedError) as exc:
         pytest.skip(f"{case_id}: not ported yet ({exc})")
 
-    report = compare(case_id, got, fixture, tol=tol, tol_columns=case.get("tol_columns"))
+    report = compare(
+        case_id,
+        got,
+        fixture,
+        tol=tol,
+        tol_columns=case.get("tol_columns"),
+        row_order_artifact=case.get("row_order_artifact"),
+    )
 
     if not report.ok:
         if case.get("gating", True) is False:

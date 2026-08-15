@@ -1,6 +1,6 @@
 {
   "note": "Minimal shims used in place of the real packages; see tools/build_r_shims.R",
-  "loa": "loa 0.0.0.9000 (real package)",
+  "loa": "CRAN loa_0.3.1.1.tar.gz, R/list.handlers.R",
   "AQEval": "github.com/karlropkins/AQEval @ eccaecebdf90e3e65af77f6e876afe12395a0baa, R/find.near.R + R/calculate.stats.R",
   "OpenStreetMap": "stand-in, not upstream source: bbox echoed back, no tiles",
   "aqeval_sha": "eccaecebdf90e3e65af77f6e876afe12395a0baa"

@@ -131,9 +131,11 @@ jobs:
         run: make r-shims
 
       - name: Regenerate every fixture from live R
+        # generate.R first: it installs DTEval into the project-local .Rlib,
+        # which generate_rcompat.R then needs loadable.
         run: |
-          Rscript parity/generate_rcompat.R
           Rscript parity/generate.R
+          Rscript parity/generate_rcompat.R
 
       - name: Provenance differences (informational)
         # _lock.json and _shims.json record the machine that generated the

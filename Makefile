@@ -32,9 +32,11 @@ r-shims:
 datasets: r-reference
 	Rscript tools/export_datasets.R
 
+# generate.R first: it is what installs DTEval into the project-local .Rlib,
+# and generate_rcompat.R needs the package loadable.
 fixtures: r-reference r-shims
-	Rscript parity/generate_rcompat.R
 	Rscript parity/generate.R
+	Rscript parity/generate_rcompat.R
 
 test:
 	$(PY) -m pytest

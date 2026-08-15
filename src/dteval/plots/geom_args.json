@@ -1,0 +1,46 @@
+{
+  "GeomPoint": {
+    "aes": ["x", "y", "shape", "colour", "fill", "size", "alpha", "stroke"],
+    "all": ["x", "y", "shape", "colour", "fill", "size", "alpha", "stroke", "na.rm", "group"]
+  },
+  "GeomPath": {
+    "aes": ["x", "y", "colour", "linewidth", "linetype", "alpha"],
+    "all": ["x", "y", "colour", "linewidth", "linetype", "alpha", "na.rm", "group"]
+  },
+  "GeomLine": {
+    "aes": ["x", "y", "colour", "linewidth", "linetype", "alpha"],
+    "all": ["x", "y", "colour", "linewidth", "linetype", "alpha", "na.rm", "orientation", "group"]
+  },
+  "GeomSmooth": {
+    "aes": ["x", "y", "colour", "fill", "linewidth", "linetype", "weight", "alpha"],
+    "all": ["x", "y", "colour", "fill", "linewidth", "linetype", "weight", "alpha", "na.rm", "orientation", "group"]
+  },
+  "GeomRibbon": {
+    "aes": ["x", "y", "ymin", "xmin", "ymax", "xmax", "colour", "fill", "linewidth", "linetype", "alpha"],
+    "all": ["x", "y", "ymin", "xmin", "ymax", "xmax", "colour", "fill", "linewidth", "linetype", "alpha", "na.rm", "orientation", "group"]
+  },
+  "GeomBoxplot": {
+    "aes": ["x", "y", "lower", "xlower", "upper", "xupper", "middle", "xmiddle", "ymin", "xmin", "ymax", "xmax", "weight", "colour", "fill", "size", "alpha", "shape", "linetype", "linewidth", "width"],
+    "all": ["x", "y", "lower", "xlower", "upper", "xupper", "middle", "xmiddle", "ymin", "xmin", "ymax", "xmax", "weight", "colour", "fill", "size", "alpha", "shape", "linetype", "linewidth", "width", "na.rm", "orientation", "outliers", "group"]
+  },
+  "GeomPolygon": {
+    "aes": ["x", "y", "colour", "fill", "linewidth", "linetype", "alpha", "subgroup"],
+    "all": ["x", "y", "colour", "fill", "linewidth", "linetype", "alpha", "subgroup", "na.rm", "group"]
+  },
+  "GeomRaster": {
+    "aes": ["x", "y", "fill", "alpha"],
+    "all": ["x", "y", "fill", "alpha", "na.rm", "group"]
+  },
+  "GeomContour": {
+    "aes": ["x", "y", "weight", "colour", "linewidth", "linetype", "alpha"],
+    "all": ["x", "y", "weight", "colour", "linewidth", "linetype", "alpha", "na.rm", "group"]
+  },
+  "GeomCol": {
+    "aes": ["x", "y", "colour", "fill", "linewidth", "linetype", "alpha", "width"],
+    "all": ["x", "y", "colour", "fill", "linewidth", "linetype", "alpha", "width", "just", "na.rm", "orientation", "group"]
+  },
+  "GeomVline": {
+    "aes": ["xintercept", "colour", "linewidth", "linetype", "alpha"],
+    "all": ["xintercept", "colour", "linewidth", "linetype", "alpha", "na.rm", "group"]
+  }
+}

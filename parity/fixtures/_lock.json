@@ -1,0 +1,30 @@
+{
+  "ser_version": 1,
+  "generated_by": "parity/generate.R",
+  "upstream_repo": "https://github.com/karlropkins/DTEval",
+  "upstream_sha": "08a6cbda6d5703ef564f076f5ae5aafc1d7ad6d6",
+  "r_source_hash": "e44eb652abc95710d2fa841514e98376",
+  "r_data_hash": "f0d276366a113c5e643da5d1f8fe60a2",
+  "r_version": "4.6.1",
+  "locale": {
+    "LC_COLLATE": "C",
+    "LC_TIME": "C",
+    "LC_NUMERIC": "C"
+  },
+  "relaxed_imports": "OpenStreetMap",
+  "shims": {
+    "note": "Minimal shims used in place of the real packages; see tools/build_r_shims.R",
+    "loa": "loa 0.0.0.9000 (real package)",
+    "AQEval": "github.com/karlropkins/AQEval @ eccaecebdf90e3e65af77f6e876afe12395a0baa, R/find.near.R + R/calculate.stats.R",
+    "aqeval_sha": "eccaecebdf90e3e65af77f6e876afe12395a0baa"
+  },
+  "packages": {
+    "data.table": "1.18.4",
+    "ggplot2": "4.0.3",
+    "AQEval": "0.0.0.9000",
+    "mgcv": "1.9.4",
+    "cluster": "2.1.8.3",
+    "sf": "1.1.2"
+  },
+  "n_cases": 1
+}

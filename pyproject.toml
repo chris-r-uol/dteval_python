@@ -1,0 +1,87 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dteval"
+version = "0.1.1.3"
+description = "Python port of the DTEval R package: diffusion tube (DT) air quality data evaluation"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "GPL-3.0-or-later"
+authors = [{ name = "Karl Ropkins", email = "k.ropkins@its.leeds.ac.uk" }]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+  "Topic :: Scientific/Engineering :: Atmospheric Science",
+]
+dependencies = [
+  "numpy>=1.26",
+  "pandas>=2.1",
+  "scipy>=1.11",
+  "scikit-misc>=0.3",
+  "shapely>=2.0",
+  "pyproj>=3.6",
+  # The user's own AQEval port. DTEval needs find_near_lat_lon and
+  # calc_date_range_stat; reimplementing them here would duplicate a maintained
+  # package. Requires the haversine R-parity fix (>= the fix/haversine-r-parity
+  # branch) -- see docs/parity.md.
+  "aqeval>=0.7.1",
+]
+
+[project.optional-dependencies]
+plots = ["plotnine>=0.13", "matplotlib>=3.8"]
+maps = ["folium>=0.15", "contextily>=1.5"]
+dev = [
+  "pytest>=8.0",
+  "pyyaml>=6.0",
+  "ruff>=0.6",
+]
+all = ["dteval[plots,maps,dev]"]
+
+[project.urls]
+Homepage = "https://github.com/karlropkins/DTEval"
+Upstream = "https://github.com/karlropkins/DTEval"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dteval"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "parity: compares Python output against committed R fixtures",
+  "live_r: requires a working R installation with DTEval dependencies",
+]
+# DTEval exports test_tube_precision / test_tube_accuracy / test_tube_meta.
+# Those are library functions, not tests. Tests must reach them through a module
+# reference (dteval.test_tube_precision), never `from dteval import ...`, or
+# pytest will try to collect them. The ruff rule below enforces that.
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011", "UP031"]
+# Percent-formatting in these mirrors C printf semantics deliberately -- the
+# whole point is to reproduce %.17g / %.*f / %.*g exactly.
+"**/numfmt.py" = ["UP031"]
+"**/stats.py" = ["UP031"]
+"**/rmath.py" = ["UP031"]
+"**/compare.py" = ["UP031"]
+# palette.hcl mirrors R's hcl(h, c, l) signature -- callers write l=65, so the
+# parameter name is part of the API, not a style slip.
+"**/palette.py" = ["E741"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"dteval.test_tube_precision".msg = "import the module and call dteval.test_tube_precision(...) — a bare import is collected by pytest as a test"
+"dteval.test_tube_accuracy".msg = "import the module and call dteval.test_tube_accuracy(...) — a bare import is collected by pytest as a test"
+"dteval.test_tube_meta".msg = "import the module and call dteval.test_tube_meta(...) — a bare import is collected by pytest as a test"
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/dteval/data" = "dteval/data"

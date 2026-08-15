@@ -1,0 +1,254 @@
+# Parity case manifest -- the single source of truth for R-vs-Python comparison.
+#
+# Each case gives the R expression and the Python expression side by side, so
+# the two can be read against each other in one place. The R side is evaluated
+# by parity/generate.R and serialised to parity/fixtures/<id>.json; the Python
+# side is evaluated by tests/test_parity.py and compared against that fixture.
+#
+# Fields
+#   id         unique, becomes the fixture filename
+#   r          R expression, evaluated with DTEval + datasets attached
+#   py         Python expression, evaluated with `dteval as dte` and datasets in scope
+#   compare    optional dotted path into the result (e.g. "lookup") to compare
+#              instead of the whole value
+#   gating     default true. false = deviation is reported but does not fail CI
+#   tol        optional relative tolerance for doubles. REQUIRES `reason`.
+#   reason     why a tolerance is justified. Mandatory whenever tol is set.
+#
+# Bit-exactness is the default. A tolerance without a documented reason is a
+# bug, not a convenience.
+
+meta:
+  upstream_repo: https://github.com/karlropkins/DTEval
+  upstream_sha: 08a6cbda6d5703ef564f076f5ae5aafc1d7ad6d6
+  locale:
+    LC_COLLATE: C
+    LC_TIME: C
+    LC_NUMERIC: C
+
+cases:
+  # --- datasets: the port must start from byte-identical inputs -------------
+  - id: data/dt.brd
+    r: dt.brd
+    py: dte.datasets.dt_brd()
+  - id: data/dt.calendar
+    r: dt.calendar
+    py: dte.datasets.dt_calendar()
+
+  # --- tagging --------------------------------------------------------------
+  - id: tag/tagTube.default
+    r: tagTube(dt.brd)
+    py: dte.tag_tube(dte.datasets.dt_brd())
+  - id: tag/tagTubeStartEnd.m1
+    r: tagTubeStartEnd(dt.brd[setdiff(names(dt.brd), c(".start_date", ".end_date"))], method = 1)
+    py: dte.tag_tube_start_end(dte.datasets.dt_brd().drop(columns=[".start_date", ".end_date"]), method=1)
+  - id: tag/tagTubeStartEnd.m2
+    r: tagTubeStartEnd(dt.brd[setdiff(names(dt.brd), c(".start_date", ".end_date"))], method = 2)
+    py: dte.tag_tube_start_end(dte.datasets.dt_brd().drop(columns=[".start_date", ".end_date"]), method=2)
+  - id: tag/tagTubeSampleID
+    r: tagTubeSampleID(dt.brd)
+    py: dte.tag_tube_sample_id(dte.datasets.dt_brd())
+  - id: tag/tagTubeDate
+    r: tagTubeDate(dt.brd)
+    py: dte.tag_tube_date(dte.datasets.dt_brd())
+  - id: tag/tagTubeMonth
+    r: tagTubeMonth(dt.brd)
+    py: dte.tag_tube_month(dte.datasets.dt_brd())
+  - id: tag/tagTubeYear
+    r: tagTubeYear(dt.brd)
+    py: dte.tag_tube_year(dte.datasets.dt_brd())
+  - id: tag/tagTubeLocation
+    r: tagTubeLocation(dt.brd)
+    py: dte.tag_tube_location(dte.datasets.dt_brd())
+
+  # --- tagging: numeric month takes a different branch in methods 1 and 2 ----
+  - id: tag/tagTubeStartEnd.m1.numeric.month
+    r: tagTubeStartEnd(dt.brd[setdiff(names(dt.brd), c(".start_date", ".end_date"))], method = 1, month = "month_numeric")
+    py: dte.tag_tube_start_end(dte.datasets.dt_brd().drop(columns=[".start_date", ".end_date"]), method=1, month="month_numeric")
+
+  # --- calc -----------------------------------------------------------------
+  - id: calc/calcTubeStat.basic
+    r: calcTubeStat(dt.brd)
+    py: dte.calc_tube_stat(dte.datasets.dt_brd())
+  - id: calc/calcTubeStat.by.year
+    r: calcTubeStat(dt.brd, tube = ".value", by = "year_of_measurement")
+    py: dte.calc_tube_stat(dte.datasets.dt_brd(), tube=".value", by="year_of_measurement")
+  - id: calc/calcTubeStat.multi.stat
+    r: 'calcTubeStat(dt.brd, tube = ".value", by = "year_of_measurement", stat = function(x) c(mean = mean(x, na.rm = TRUE), med = median(x, na.rm = TRUE), sd = sd(x, na.rm = TRUE)))'
+    py: 'dte.calc_tube_stat(dte.datasets.dt_brd(), tube=".value", by="year_of_measurement", stat=lambda x: {"mean": dte.rcompat.stats.r_mean(x, na_rm=True), "med": dte.rcompat.stats.r_median(x, na_rm=True), "sd": dte.rcompat.stats.r_sd(x, na_rm=True)})'
+  - id: calc/calcTubeStat.by.location
+    r: calcTubeStat(dt.brd, tube = ".value", by = ".location")
+    py: dte.calc_tube_stat(dte.datasets.dt_brd(), tube=".value", by=".location")
+  - id: calc/calcTubeStat.by.two
+    r: calcTubeStat(dt.brd, tube = ".value", by = c(".year", ".month"))
+    py: dte.calc_tube_stat(dte.datasets.dt_brd(), tube=".value", by=[".year", ".month"])
+  - id: calc/calcTubeStat.multi.tube
+    r: calcTubeStat(dt.brd, tube = c(".value", "latitude"), by = "year_of_measurement")
+    py: dte.calc_tube_stat(dte.datasets.dt_brd(), tube=[".value", "latitude"], by="year_of_measurement")
+
+  # --- getTubeX / checkTubeData: expressions, not just column names ---------
+  # These exercise the restricted R-expression evaluator that backs getTubeX.
+  - id: handlers/checkTubeData.expression
+    r: checkTubeData(tagTube(dt.brd), c("factor(local_authority)", "paste(.latitude, .longitude)"))
+    py: dte.check_tube_data(dte.tag_tube(dte.datasets.dt_brd()), ["factor(local_authority)", "paste(.latitude, .longitude)"])
+  # NB a `by` expression may not contain a comma: data.table splits the string
+  # on commas and then fails to find the pieces as columns. That upstream sharp
+  # edge is reproduced (see test_calc.py::test_comma_in_by_is_rejected), so
+  # this case uses a comma-free expression, as a user would have to.
+  - id: handlers/calcTubeStat.expression.by
+    r: calcTubeStat(dt.brd, tube = ".value", by = "factor(local_authority)")
+    py: dte.calc_tube_stat(dte.datasets.dt_brd(), tube=".value", by="factor(local_authority)")
+
+  # --- summaries ------------------------------------------------------------
+  - id: summary/tubeSummary
+    r: tubeSummary(dt.brd)
+    py: dte.tube_summary(dte.datasets.dt_brd())
+  - id: summary/tubeSummarySample
+    r: tubeSummarySample(dt.brd)
+    py: dte.tube_summary_sample(dte.datasets.dt_brd())
+  - id: summary/tubeSummaryLatLon.full
+    r: tubeSummaryLatLon(dt.brd, output = "full.report")
+    py: dte.tube_summary_lat_lon(dte.datasets.dt_brd(), output="full.report")
+
+  # --- polygon --------------------------------------------------------------
+  - id: latlon/tubeInXYPolygon
+    r: tubeInXYPolygon(dt.brd, caz.brd, rename = "in.caz")
+    py: dte.tube_in_xy_polygon(dte.datasets.dt_brd(), dte.datasets.caz_brd(), rename="in.caz")
+
+  # --- annual ---------------------------------------------------------------
+  - id: annual/tubeAnnualCover
+    r: tubeAnnualCover(dt.brd)
+    py: dte.tube_annual_cover(dte.datasets.dt_brd())
+
+  # --- precision ------------------------------------------------------------
+  - id: precision/default
+    r: testTubePrecision(dt.brd, show = character(0))
+    py: dte.test_tube_precision(dte.datasets.dt_brd(), show=[])
+    tol: 1.0e-11
+    tol_columns: [".y", ".ylow", ".yhigh", "low", "high", "low.pc", "high.pc"]
+    reason: >-
+      LOESS-derived only. R's loess and scikit-misc both wrap netlib dloess but
+      are built with different compilers, so single-predictor fits agree to
+      about 10 ulps rather than bit-for-bit; the lookup's percentage columns
+      amplify that through (low - ans)/ans * 100. Measured worst case across
+      the precision cases is 2.0e-13, so this bound has ~50x headroom while
+      staying orders of magnitude tighter than any real error. Every other
+      column -- .n, .mean, .sd, .low, .high, row order, column order and the
+      report string -- is compared bit-exactly.
+
+  - id: precision/method1
+    r: testTubePrecision(dt.brd, method = 1, show = character(0))
+    py: dte.test_tube_precision(dte.datasets.dt_brd(), method=1, show=[])
+    tol: 1.0e-11
+    tol_columns: [".y", ".ylow", ".yhigh", "low", "high", "low.pc", "high.pc"]
+    reason: >-
+      LOESS-derived only. R's loess and scikit-misc both wrap netlib dloess but
+      are built with different compilers, so single-predictor fits agree to
+      about 10 ulps rather than bit-for-bit; the lookup's percentage columns
+      amplify that through (low - ans)/ans * 100. Measured worst case across
+      the precision cases is 2.0e-13, so this bound has ~50x headroom while
+      staying orders of magnitude tighter than any real error. Every other
+      column -- .n, .mean, .sd, .low, .high, row order, column order and the
+      report string -- is compared bit-exactly.
+
+  - id: precision/method3
+    r: testTubePrecision(dt.brd, method = 3, show = character(0))
+    py: dte.test_tube_precision(dte.datasets.dt_brd(), method=3, show=[])
+    tol: 1.0e-11
+    tol_columns: [".y", ".ylow", ".yhigh", "low", "high", "low.pc", "high.pc"]
+    reason: >-
+      LOESS-derived only. R's loess and scikit-misc both wrap netlib dloess but
+      are built with different compilers, so single-predictor fits agree to
+      about 10 ulps rather than bit-for-bit; the lookup's percentage columns
+      amplify that through (low - ans)/ans * 100. Measured worst case across
+      the precision cases is 2.0e-13, so this bound has ~50x headroom while
+      staying orders of magnitude tighter than any real error. Every other
+      column -- .n, .mean, .sd, .low, .high, row order, column order and the
+      report string -- is compared bit-exactly.
+
+  - id: precision/method4
+    r: testTubePrecision(dt.brd, method = 4, show = character(0))
+    py: dte.test_tube_precision(dte.datasets.dt_brd(), method=4, show=[])
+    tol: 1.0e-11
+    tol_columns: [".y", ".ylow", ".yhigh", "low", "high", "low.pc", "high.pc"]
+    reason: >-
+      LOESS-derived only. R's loess and scikit-misc both wrap netlib dloess but
+      are built with different compilers, so single-predictor fits agree to
+      about 10 ulps rather than bit-for-bit; the lookup's percentage columns
+      amplify that through (low - ans)/ans * 100. Measured worst case across
+      the precision cases is 2.0e-13, so this bound has ~50x headroom while
+      staying orders of magnitude tighter than any real error. Every other
+      column -- .n, .mean, .sd, .low, .high, row order, column order and the
+      report string -- is compared bit-exactly.
+
+  - id: precision/facet.year
+    r: testTubePrecision(dt.brd, facet = ".year", show = character(0))
+    py: dte.test_tube_precision(dte.datasets.dt_brd(), facet=".year", show=[])
+
+  # --- deseason -------------------------------------------------------------
+    tol: 1.0e-11
+    tol_columns: [".y", ".ylow", ".yhigh", "low", "high", "low.pc", "high.pc"]
+    reason: >-
+      LOESS-derived only. R's loess and scikit-misc both wrap netlib dloess but
+      are built with different compilers, so single-predictor fits agree to
+      about 10 ulps rather than bit-for-bit; the lookup's percentage columns
+      amplify that through (low - ans)/ans * 100. Measured worst case across
+      the precision cases is 2.0e-13, so this bound has ~50x headroom while
+      staying orders of magnitude tighter than any real error. Every other
+      column -- .n, .mean, .sd, .low, .high, row order, column order and the
+      report string -- is compared bit-exactly.
+
+  - id: deseason/method1.location
+    r: deseasonTubeData(dt.brd, ".value", by = ".location")
+    py: dte.deseason_tube_data(dte.datasets.dt_brd(), ".value", by=".location")
+
+  # --- fit ------------------------------------------------------------------
+  - id: fit/loess.latlon.by.year
+    r: fitTubeModel(dt.brd, inputs = c(".latitude", ".longitude"), by = ".year", simplify = TRUE)
+    py: dte.fit_tube_model(dte.datasets.dt_brd(), inputs=[".latitude", ".longitude"], by=".year", simplify=True)
+
+  # --- cluster --------------------------------------------------------------
+  - id: cluster/method2.location
+    r: clusterTubeData(dt.brd, tube = ".value", by = ".location", clusters = 2, method = 2)
+    py: dte.cluster_tube_data(dte.datasets.dt_brd(), tube=".value", by=".location", clusters=2, method=2)
+
+  # --- plots ----------------------------------------------------------------
+  # Compared on DTEval's decisions: geom, the exact data handed to each layer,
+  # the aesthetic mappings, constant aesthetics, facets and labels. See
+  # docs/parity.md for why this rather than ggplot_build() output.
+  - id: plot/tubePlot.date.value
+    r: tubePlot(dt.brd, ".date", ".value")
+    py: dte.tube_plot(dte.datasets.dt_brd(), ".date", ".value")
+  - id: plot/tubePlot.colour.mapped
+    r: tubePlot(dt.brd, ".date", ".value", col = ".year")
+    py: dte.tube_plot(dte.datasets.dt_brd(), ".date", ".value", col=".year")
+  - id: plot/tubePlot.colour.constant
+    r: tubePlot(dt.brd, ".date", ".value", col = "red")
+    py: dte.tube_plot(dte.datasets.dt_brd(), ".date", ".value", col="red")
+  - id: plot/tubePlot.point.prefixed.arg
+    r: tubePlot(dt.brd, ".date", ".value", point.col = "blue", point.alpha = 0.4)
+    py: 'dte.tube_plot(dte.datasets.dt_brd(), ".date", ".value", **{"point.col": "blue", "point.alpha": 0.4})'
+  - id: plot/tubePlot.facet.wrap
+    r: tubePlot(dt.brd, ".date", ".value", facet = ".year")
+    py: dte.tube_plot(dte.datasets.dt_brd(), ".date", ".value", facet=".year")
+  - id: plot/tubePlot.facet.grid.col
+    r: 'tubePlot(dt.brd, ".date", ".value", facet = ".year", facet.type = "grid.col")'
+    py: 'dte.tube_plot(dte.datasets.dt_brd(), ".date", ".value", facet=".year", **{"facet.type": "grid.col"})'
+  - id: plot/tubePlot.line
+    r: 'tubePlot(dt.brd, ".date", ".value", plot.type = "line")'
+    py: 'dte.tube_plot(dte.datasets.dt_brd(), ".date", ".value", plot_type="line")'
+  - id: plot/tubePlot.box.by.month
+    r: 'tubePlot(dt.brd, ".month", ".value", plot.type = "box")'
+    py: 'dte.tube_plot(dte.datasets.dt_brd(), ".month", ".value", plot_type="box")'
+  - id: plot/tubePlot.band
+    r: 'tubePlot(dt.brd, ".date", ".value", plot.type = "band")'
+    py: 'dte.tube_plot(dte.datasets.dt_brd(), ".date", ".value", plot_type="band")'
+  - id: plot/tubePlot.quicktext.labels
+    r: 'tubePlot(dt.brd, ".date", ".value", ylab = "NO2 ug/m3", xlab = "date")'
+    py: 'dte.tube_plot(dte.datasets.dt_brd(), ".date", ".value", ylab="NO2 ug/m3", xlab="date")'
+  - id: plot/tubePlot.overplot.mean
+    r: 'tubePlot(dt.brd, ".longitude", ".latitude", overplot = "mean", col = ".value")'
+    py: 'dte.tube_plot(dte.datasets.dt_brd(), ".longitude", ".latitude", overplot="mean", col=".value")'
+  - id: plot/tubeTimePlot
+    r: tubeTimePlot(dt.brd, y = ".value")
+    py: dte.tube_time_plot(dte.datasets.dt_brd(), y=".value")

@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Upstream R package: pinned by SHA in parity/fixtures/_lock.json and cloned on
+# demand by `make r-reference` / CI. Never vendored into this repo.
+r_reference/
+
+# Scratch output from parity runs
+parity/_out/
+.Rlib/

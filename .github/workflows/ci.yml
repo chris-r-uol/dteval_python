@@ -83,13 +83,11 @@ jobs:
     container:
       image: rocker/r-ver:4.6.1
     steps:
-      - uses: actions/checkout@v7
-
-      - name: Trust the workspace
-        # The job runs in a container as root over a mounted workspace, which
-        # trips git's dubious-ownership check; `git diff` below needs it.
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
+      # Before checkout, deliberately. rocker/r-ver ships no git, and without
+      # it actions/checkout silently falls back to downloading a tarball over
+      # the REST API -- which leaves no .git, so the fixture gate below has
+      # nothing to diff against. apt does not need the workspace, so this is
+      # free to run first.
       - name: System dependencies
         run: |
           apt-get update -qq
@@ -97,6 +95,13 @@ jobs:
             python3 python3-pip python3-venv git \
             libcurl4-openssl-dev libssl-dev libxml2-dev \
             libudunits2-dev libgdal-dev libgeos-dev libproj-dev
+
+      - uses: actions/checkout@v7
+
+      - name: Trust the workspace
+        # The job runs in a container as root over a mounted workspace, which
+        # trips git's dubious-ownership check; `git diff` below needs it.
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Cache the R library
         uses: actions/cache@v6

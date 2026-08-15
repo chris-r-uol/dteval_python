@@ -101,6 +101,24 @@ the same data differs in the last ulp between a build with
 `capabilities("long.double")` and one without. `compare_fixtures.py` applies
 what the project actually claims: structure exactly, numbers to 1e-6.
 
+## Figures
+
+```bash
+make figures         # the Python-native matplotlib set, including NO2 surfaces over OSM
+make figure-parity   # draw one catalogue in BOTH implementations and compare the layers
+```
+
+`make figures` is the presentation the port draws for itself — perceptually
+uniform colour ramps, masked surfaces, hexbin where a scatter would overplot —
+and deliberately looks nothing like the R package's ggplot2 output. The parity
+contract is about values, not pixels.
+
+`make figure-parity` is the other half: `tools/figures/catalogue.yaml` defines
+each figure once, both implementations draw from it, and the Python layer data
+is checked against R's through `parity/compare.py` — so the check honours each
+case's documented tolerances rather than inventing stricter ones. Output lands
+in `build/figures/`.
+
 ## Known parity gaps
 
 All 37 exported functions are ported. Three diverge from R numerically, each

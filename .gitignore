@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+# build artifacts, rendered figures and cached map tiles
 build/
 dist/
 .pytest_cache/

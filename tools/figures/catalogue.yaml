@@ -1,0 +1,79 @@
+# One definition per figure, read by BOTH renderers -- the same discipline as
+# parity/manifest.yaml. Neither side can quietly draw something different.
+figures:
+  - id: timeseries
+    # settings (row-order artifacts, tolerances) come from this manifest case
+    case: plot/tubePlot.colour.mapped
+    title: NO2 by sampling date, coloured by year
+    caption: >-
+      Every tube reading against the midpoint of its sampling window. The
+      seasonal cycle is the dominant structure -- winter maxima roughly double
+      the summer minima.
+    r: 'tubePlot(dt.brd, ".date", ".value", col = ".year")'
+    py: 'dte.tube_plot(dte.datasets.dt_brd(), ".date", ".value", col=".year")'
+    width: 8
+    height: 4.5
+
+  - id: monthly-box
+    # settings (row-order artifacts, tolerances) come from this manifest case
+    case: plot/tubePlot.box.by.month
+    title: Monthly distribution
+    caption: >-
+      The same seasonality as a distribution rather than a cloud. Box plots use
+      R's quantile type 7, which numpy matches by default.
+    r: 'tubePlot(dt.brd, ".month", ".value", plot.type = "box")'
+    py: 'dte.tube_plot(dte.datasets.dt_brd(), ".month", ".value", plot_type="box")'
+    width: 8
+    height: 4.5
+
+  - id: precision
+    # settings (row-order artifacts, tolerances) come from this manifest case
+    case: precision/default
+    title: Replicate precision
+    caption: >-
+      Co-located triplicates against their own mean, with a LOESS fit and
+      confidence bounds. This is the figure the port works hardest for -- the
+      bounds come from three separate LOESS fits.
+    r: 'testTubePrecision(dt.brd, show = character(0))$plot'
+    py: 'dte.test_tube_precision(dte.datasets.dt_brd(), show=[])["plot"]'
+    width: 8
+    height: 5
+
+  - id: accuracy
+    # settings (row-order artifacts, tolerances) come from this manifest case
+    case: plot/testTubeAccuracy.plot
+    title: Tubes against a reference monitor
+    caption: >-
+      Tube values against a co-located continuous analyser, averaged over each
+      tube's own sampling window, with an ordinary least squares fit. The
+      reference here is the synthetic AURN-shaped series, so the slope is a
+      property of the mock data, not of Bradford.
+    r: 'testTubeAccuracy(dt.brd, aurn.example, max.distance = 2500, show = character(0))$plot'
+    py: 'dte.test_tube_accuracy(dte.datasets.dt_brd(), dte.datasets.aurn_example(), max_distance=2500, show=[])["plot"]'
+    width: 7
+    height: 5
+
+  - id: meta
+    # settings (row-order artifacts, tolerances) come from this manifest case
+    case: plot/testTubeMeta.type2
+    title: Meta-data completeness
+    caption: >-
+      For each column, how consistently it is populated at four levels of
+      aggregation. Green is single-valued, amber single-valued plus missing,
+      red genuinely inconsistent, grey entirely missing.
+    r: 'testTubeMeta(dt.brd)'
+    py: 'dte.test_tube_meta(dte.datasets.dt_brd())'
+    width: 9
+    height: 6
+
+  - id: map
+    # settings (row-order artifacts, tolerances) come from this manifest case
+    case: map/tubeMap.default
+    title: Sampling locations
+    caption: >-
+      Tube locations with the axes blanked, as tubeMap draws them. The ESRI
+      basemap raster is absent on both sides by design -- see docs/parity.md.
+    r: 'tubeMap(dt.brd)'
+    py: 'dte.tube_map(dte.datasets.dt_brd())'
+    width: 6.5
+    height: 6

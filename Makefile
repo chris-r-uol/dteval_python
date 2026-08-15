@@ -3,13 +3,15 @@ UPSTREAM_SHA  := 08a6cbda6d5703ef564f076f5ae5aafc1d7ad6d6
 R_REFERENCE   ?= r_reference
 PY            ?= .venv/bin/python
 
-.PHONY: help r-reference r-shims fixtures datasets test parity lint clean
+.PHONY: figures figure-parity help r-reference r-shims fixtures datasets test parity lint clean
 
 help:
 	@echo "make r-reference  clone/checkout the pinned upstream DTEval tree"
 	@echo "make r-shims      build minimal loa/AQEval/OpenStreetMap shims (no JDK)"
 	@echo "make datasets     re-export bundled datasets from the R .rda files"
 	@echo "make fixtures     regenerate all parity fixtures from live R"
+	@echo "make figures      draw the Python-native figure set"
+	@echo "make figure-parity  draw the catalogue in R and Python, compare layers"
 	@echo "make test         run the full test suite"
 	@echo "make parity       run only the parity comparisons"
 	@echo "make lint         ruff check"
@@ -37,6 +39,17 @@ datasets: r-reference
 fixtures: r-reference r-shims
 	Rscript parity/generate.R
 	Rscript parity/generate_rcompat.R
+
+# Python-native figures (matplotlib). Needs dteval[plots,basemap]; OSM tiles
+# are cached under ~/.cache/dteval/tiles after the first run.
+figures:
+	python tools/figures/native.py
+
+# Draw the shared catalogue with BOTH implementations and compare the layer
+# data. Needs R as well; see tools/figures/catalogue.yaml.
+figure-parity: r-reference r-shims
+	Rscript tools/figures/render.R
+	python tools/figures/validate.py
 
 test:
 	$(PY) -m pytest

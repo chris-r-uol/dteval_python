@@ -290,6 +290,62 @@ def compare_ggplot(
         compare_frame(exp_data, got_data, f"{lp}.data", rep, tol, tol_columns)
 
 
+def compare_leaflet(
+    exp: dict,
+    got: Any,
+    path: str,
+    rep: Report,
+    tol: float | None,
+) -> None:
+    """Compare an interactive map on its layer content.
+
+    leaflet's HTML and folium's have nothing structural in common, so what is
+    compared is what DTEval decided: the ordered list of layer calls, and per
+    call the coordinates, radii and colours it passed. See serialize_leaflet()
+    in parity/serialize.R for how R's positional argument lists are named.
+    """
+    spec = got.parity_spec() if hasattr(got, "parity_spec") else got
+    if not isinstance(spec, dict):
+        rep.add(path, f"expected a map exposing parity_spec(), got {type(got).__name__}")
+        return
+
+    exp_calls = exp.get("calls") or []
+    got_calls = spec.get("calls") or []
+    if len(exp_calls) != len(got_calls):
+        rep.add(
+            f"{path}.calls",
+            f"{len(got_calls)} call(s), expected {len(exp_calls)} "
+            f"(R: {[c.get('method') for c in exp_calls]}, "
+            f"python: {[c.get('method') for c in got_calls]})",
+        )
+        return
+
+    for i, (ec, gc) in enumerate(zip(exp_calls, got_calls, strict=True)):
+        cp = f"{path}.calls[{i}]"
+        if ec.get("method") != gc.get("method"):
+            rep.add(f"{cp}.method", f"R={ec.get('method')!r} python={gc.get('method')!r}")
+            continue
+
+        names = _as_str_list(ec["args"].get("names"))
+        values = ec["args"].get("values") or []
+        got_args = gc.get("args") or {}
+        for name, node in zip(names, values, strict=True):
+            if name not in got_args:
+                rep.add(f"{cp}.{name}", "missing from Python result")
+                continue
+            expected = load_value(node)
+            actual = got_args[name]
+            if isinstance(expected, pd.Series):
+                if not isinstance(actual, pd.Series):
+                    actual = pd.Series(
+                        actual if isinstance(actual, list | np.ndarray) else [actual],
+                        dtype=expected.dtype,
+                    )
+                compare_series(expected, actual, f"{cp}.{name}", rep, tol)
+            else:
+                _compare_any(expected, actual, f"{cp}.{name}", rep, tol)
+
+
 def _as_str_list(v) -> list[str]:
     if v is None:
         return []
@@ -382,6 +438,10 @@ def compare(
         compare_ggplot(node, got, "$", rep, tol, cols, row_order_artifact, label_columns)
         return rep
 
+    if node["type"] == "leaflet":
+        compare_leaflet(node, got, "$", rep, tol)
+        return rep
+
     exp = load_value(node)
     exp, got = _prepare(exp, got, rep, row_order_artifact, label_columns)
     _compare_any(exp, got, "$", rep, tol, cols, row_order_artifact, label_columns)
@@ -427,6 +487,9 @@ def _compare_any(
         compare_ggplot(
             exp, got, path, rep, tol, tol_columns, row_order_artifact, label_columns
         )
+        return
+    if isinstance(exp, dict) and exp.get("type") == "leaflet":
+        compare_leaflet(exp, got, path, rep, tol)
         return
     if exp is None:
         if got is not None:

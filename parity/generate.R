@@ -79,9 +79,12 @@ dir.create(lib, recursive = TRUE, showWarnings = FALSE)
 #
 # The relaxation is recorded in _lock.json so it is visible in the fixture
 # provenance.
-# AQEval is normally supplied by tools/build_r_shims.R (see that file for why).
-# OpenStreetMap needs rJava and is only used for tubeMap basemaps, which are
-# not parity-tested, so it stays relaxed when unavailable.
+# Both are normally supplied by tools/build_r_shims.R (see that file, and the
+# shim section of docs/parity.md, for what each one is). Relaxing them out is
+# the fallback when they are not: AQEval's absence costs the testTubeAccuracy /
+# deseason(method=2) / tubeSummaryLatLon cases, OpenStreetMap's costs the
+# tubeMap cases. Those cases then fail loudly and are reported, rather than
+# being silently skipped.
 RELAXED_IMPORTS <- c("AQEval", "OpenStreetMap")
 if (!requireNamespace("AQEval", quietly = TRUE)) {
   message("note: AQEval not installed. Run `make r-shims` to build the minimal\n",
@@ -129,6 +132,12 @@ data_env <- new.env()
 for (nm in c("dt.brd", "dt.calendar", "caz.brd")) {
   assign(nm, get(nm, envir = asNamespace("DTEval")), envir = data_env)
 }
+
+# the accuracy cases need a reference monitor; see tools/aurn_example.R for why
+# it is generated rather than loaded
+source(file.path(root, "tools", "aurn_example.R"))
+assign("aurn.example", make_aurn_example(data_env$dt.brd), envir = data_env)
+
 attach(data_env, name = "DTEval_data", warn.conflicts = FALSE)
 
 # ------------------------------------------------------------------- run ---
@@ -173,7 +182,7 @@ digest_or_tools <- function(s) {
   unname(tools::md5sum(tf))
 }
 
-pkgs <- c("data.table", "ggplot2", "AQEval", "mgcv", "cluster", "sf")
+pkgs <- c("data.table", "ggplot2", "AQEval", "mgcv", "cluster", "sf", "leaflet")
 pkg_versions <- setNames(
   lapply(pkgs, function(p) {
     v <- tryCatch(as.character(utils::packageVersion(p)), error = function(e) NA_character_)

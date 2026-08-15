@@ -71,6 +71,12 @@ extract_functions <- function(path, names) {
   out
 }
 
+# TRUE only for a genuine install: our own shims mark themselves in DESCRIPTION.
+is_real_package <- function(name) {
+  requireNamespace(name, quietly = TRUE) &&
+    !identical(utils::packageDescription(name)$Shim, "yes")
+}
+
 write_pkg <- function(name, version, title, code, imports = character(0),
                       exports = character(0), provenance = character(0)) {
   dir <- file.path(work, name)
@@ -86,7 +92,10 @@ write_pkg <- function(name, version, title, code, imports = character(0),
     "Authors@R: person('Karl', 'Ropkins', role = c('aut', 'cre'),",
     "    email = 'k.ropkins@its.leeds.ac.uk')",
     "License: GPL (>= 3)",
-    "Encoding: UTF-8"
+    "Encoding: UTF-8",
+    # marks the install as ours, so a later run replaces it rather than
+    # mistaking it for the real package
+    "Shim: yes"
   )
   if (length(imports)) {
     desc <- c(desc, paste0("Imports: ", paste(imports, collapse = ", ")))
@@ -122,8 +131,7 @@ write_pkg <- function(name, version, title, code, imports = character(0),
 # --------------------------------------------------------------------- loa --
 # AQEval calls loa::listUpdate to merge its argument defaults.
 
-if (requireNamespace("loa", quietly = TRUE) &&
-    is.null(attr(utils::packageDescription("loa"), "shim"))) {
+if (is_real_package("loa")) {
   message("real loa present; skipping shim")
   loa_provenance <- paste0("loa ", utils::packageVersion("loa"), " (real package)")
 } else {
@@ -164,6 +172,44 @@ write_pkg("AQEval", "0.0.0.9000",
           exports = c("findNearLatLon", "calcDateRangeStat"),
           provenance = aq_provenance)
 
+# ---------------------------------------------------------- OpenStreetMap --
+# tubeMap fetches an ESRI basemap through OpenStreetMap::openmap, which needs
+# rJava and a JDK. That is not available in CI, and the Python port does not
+# fetch tiles at all -- it hands the frontend a basemap *request* and lets it
+# draw its own. So this shim is NOT a port of openmap: it is a stand-in that
+# returns the requested bounding box with no tiles, which makes tubeMap's
+# non-raster behaviour (extent arithmetic, layers, limits) reproducible and
+# comparable. The raster layer itself is out of parity scope either way; see
+# docs/parity.md.
+#
+# Unlike the loa and AQEval shims, nothing here comes from upstream source.
+
+if (is_real_package("OpenStreetMap")) {
+  message("real OpenStreetMap present; skipping shim")
+  osm_provenance <- paste0("OpenStreetMap ",
+                           utils::packageVersion("OpenStreetMap"), " (real package)")
+} else {
+  osm_code <- c(
+    "openmap <- function(upperLeft, lowerRight, zoom = NULL, type = \"esri\",",
+    "                    minNumTiles = 12, mergeTiles = TRUE, ...) {",
+    "  # upperLeft/lowerRight are c(lat, lon); bbox p1/p2 are c(lon, lat)",
+    "  structure(list(tiles = list(),",
+    "                 bbox = list(p1 = c(upperLeft[2], upperLeft[1]),",
+    "                             p2 = c(lowerRight[2], lowerRight[1])),",
+    "                 zoom = zoom, type = type),",
+    "            class = c(\"OpenStreetMap\", \"list\"))",
+    "}",
+    "",
+    "openproj <- function(x, projection = NULL, ...) x",
+    ""
+  )
+  osm_provenance <- "stand-in, not upstream source: bbox echoed back, no tiles"
+  write_pkg("OpenStreetMap", "0.0.0.9000",
+            "Stand-in for OpenStreetMap (openmap, openproj)",
+            osm_code, exports = c("openmap", "openproj"),
+            provenance = osm_provenance)
+}
+
 # ------------------------------------------------------------------ record --
 writeLines(
   jsonlite::toJSON(list(
@@ -171,6 +217,7 @@ writeLines(
                  "see tools/build_r_shims.R"),
     loa = loa_provenance,
     AQEval = aq_provenance,
+    OpenStreetMap = osm_provenance,
     aqeval_sha = AQEVAL_SHA
   ), auto_unbox = TRUE, pretty = TRUE),
   file.path(root, "parity", "fixtures", "_shims.json")

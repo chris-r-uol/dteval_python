@@ -30,9 +30,11 @@ geo = ["shapely>=2.0"]
 # find_near_lat_lon / calc_date_range_stat, used by tube_summary_lat_lon and
 # deseason_tube_data(method=2). See docs/parity.md on the haversine fix.
 aqeval = ["aqeval>=0.7.1"]
-# Server-side figure rendering. Not needed if the frontend draws from
-# TubePlot.to_spec(); see docs/backend.md.
-plots = ["plotnine>=0.13"]
+# Server-side figure rendering: plotnine for TubePlot.draw(), folium for
+# LeafletMap.draw(), and matplotlib (a plotnine dependency) for the surface
+# contours. Not needed if the frontend draws from to_spec(); see
+# docs/backend.md.
+plots = ["plotnine>=0.13", "folium>=0.16"]
 dev = [
   "pytest>=8.0",
   "pyyaml>=6.0",

@@ -59,7 +59,7 @@ def calc_tube_stat(
         row: dict[str, Any] = {}
         for col in tube_cols:
             _emit(row, col, fn(d2[col]))
-        return pd.DataFrame([row])
+        return pd.DataFrame([_unlist_coerce(row)])
 
     # data.table's setorderv sorts ascending with NA *first* (na.last = FALSE),
     # which differs from base R's sort() dropping NA -- and the resulting order
@@ -76,8 +76,10 @@ def calc_tube_stat(
         key_vals = key if isinstance(key, tuple) else (key,)
         for name, value in zip(by_cols, key_vals, strict=True):
             row[name] = value
+        stats: dict[str, Any] = {}
         for col in tube_cols:
-            _emit(row, col, fn(chunk[col]))
+            _emit(stats, col, fn(chunk[col]))
+        row.update(_unlist_coerce(stats))
         records.append(row)
 
     out = pd.DataFrame.from_records(records)
@@ -122,6 +124,32 @@ def _split_by_on_commas(by_cols: list[str], data: pd.DataFrame) -> list[str]:
             f"include a comma: {offenders}"
         )
     return by_cols
+
+
+def _unlist_coerce(stats: dict[str, Any]) -> dict[str, Any]:
+    """Reproduce ``unlist()``'s type coercion across a stat's outputs.
+
+    R builds the result with ``as.list(unlist(lapply(.SD, stat)))``, and
+    ``unlist`` collapses to a single type: if any element is a character, they
+    all become characters. So a stat returning both a count and a label emits
+    ``"3"``, not ``3`` -- as ``checkTubeMeta`` does.
+    """
+    if not any(isinstance(v, str) for v in stats.values()):
+        return stats
+
+    from dteval.rcompat.numfmt import as_character
+
+    out = {}
+    for name, value in stats.items():
+        if isinstance(value, str) or value is None:
+            out[name] = value
+        elif isinstance(value, (bool, int, float, np.integer, np.floating)):
+            out[name] = as_character(
+                bool(value) if isinstance(value, (bool, np.bool_)) else value
+            )
+        else:
+            out[name] = str(value)
+    return out
 
 
 def _emit(row: dict[str, Any], col: str, value: Any) -> None:

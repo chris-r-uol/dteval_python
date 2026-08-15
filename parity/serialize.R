@@ -115,6 +115,10 @@ serialize_value <- function(x) {
     return(serialize_ggplot(x))
   }
 
+  if (inherits(x, "leaflet")) {
+    return(serialize_leaflet(x))
+  }
+
   if (is.data.frame(x)) {
     x <- as.data.frame(x)
     cols <- lapply(names(x), function(nm) {
@@ -186,6 +190,59 @@ digest_layer <- function(x) {
   tf <- tempfile(); on.exit(unlink(tf))
   writeLines(as.character(txt), tf)
   unname(tools::md5sum(tf))
+}
+
+# ---------------------------------------------------------------- leaflet ---
+# leaflet stores its layers as htmlwidget calls whose argument lists have had
+# their names stripped (leaflet::invokeMethod passes them positionally). The
+# HTML itself is not comparable across leaflet and folium, so what gets
+# serialised is the layer *content*: named per-method by position, then only
+# the arguments DTEval actually sets.
+LEAFLET_ARG_NAMES <- list(
+  addProviderTiles = c("provider", "layerId", "group", "options"),
+  addCircleMarkers = c("lat", "lng", "radius", "layerId", "group", "options",
+                       "clusterOptions", "clusterId", "popup", "popupOptions",
+                       "label", "labelOptions", "crosstalkOptions"),
+  addPolygons = c("polygons", "layerId", "group", "stroke", "color", "weight",
+                  "opacity", "fill", "fillColor", "fillOpacity", "dashArray",
+                  "smoothFactor", "noClip", "popup", "popupOptions", "label",
+                  "labelOptions", "options", "highlightOptions",
+                  "crosstalkOptions"),
+  addPolylines = c("polylines", "layerId", "group", "stroke", "color", "weight",
+                   "opacity", "fill", "fillColor", "fillOpacity", "dashArray",
+                   "smoothFactor", "noClip", "popup", "popupOptions", "label",
+                   "labelOptions", "options", "highlightOptions",
+                   "crosstalkOptions")
+)
+
+# Compared per method; everything else is leaflet plumbing (interactive flags,
+# empty className slots) that carries no DTEval decision.
+LEAFLET_KEEP <- list(
+  addProviderTiles = c("provider"),
+  addCircleMarkers = c("lat", "lng", "radius", "color", "fillColor"),
+  addPolygons      = c("color", "fillColor"),
+  addPolylines     = c("lng", "lat", "label")
+)
+
+serialize_leaflet <- function(m) {
+  calls <- lapply(m$x$calls, function(call) {
+    nms <- LEAFLET_ARG_NAMES[[call$method]]
+    args <- call$args
+    if (!is.null(nms) && length(nms) >= length(args)) {
+      names(args) <- nms[seq_along(args)]
+    }
+    # style arguments live inside the `options` list, so flatten it up
+    if ("options" %in% names(args) && is.list(args$options)) {
+      args <- c(args[names(args) != "options"], args$options)
+    }
+    keep <- LEAFLET_KEEP[[call$method]]
+    if (!is.null(keep)) args <- args[names(args) %in% keep]
+    args <- args[!vapply(args, is.null, logical(1))]
+    list(method = call$method,
+         args = list(names = names(args),
+                     values = unname(lapply(args, serialize_value))))
+  })
+  list(type = "leaflet", calls = calls)
 }
 
 serialize_ggplot <- function(p) {
@@ -281,7 +338,12 @@ serialize_ggplot <- function(p) {
 
   list(
     type = "ggplot",
-    labels = lapply(p$labels, function(v) as.character(v)[1]),
+    # a cleared label is NULL in ggplot2 and must stay distinguishable from the
+    # literal string "NA", so it is written as JSON null rather than coerced
+    labels = lapply(p$labels, function(v) {
+      v <- as.character(v)[1]
+      if (is.na(v)) NULL else v
+    }),
     facet = facet,
     facet_vars = facet_vars,
     mapping = as.list(tryCatch(vapply(p$mapping, rlang::as_label, character(1)),

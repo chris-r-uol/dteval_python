@@ -49,6 +49,12 @@ write_gz <- function(obj, name) {
 write_gz(env$dt.brd, "dt_brd")
 write_gz(env$dt.calendar, "dt_calendar")
 
+# --- a synthetic reference (continuous analyser) data set ------------------
+# Built by shared code that parity/generate.R sources too, so the R side of the
+# accuracy cases sees exactly what Python ships.
+source(file.path(root, "tools", "aurn_example.R"))
+write_gz(make_aurn_example(env$dt.brd), "aurn_example")
+
 # --- caz.brd is an sf object: export geometry as GeoJSON -------------------
 # sf/shapely both speak GeoJSON, and the CAZ boundary is only ever used for
 # point-in-polygon tests, so the geometry is the whole payload.

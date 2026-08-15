@@ -11,11 +11,12 @@
     "LC_TIME": "C",
     "LC_NUMERIC": "C"
   },
-  "relaxed_imports": "OpenStreetMap",
+  "relaxed_imports": [],
   "shims": {
     "note": "Minimal shims used in place of the real packages; see tools/build_r_shims.R",
     "loa": "loa 0.0.0.9000 (real package)",
     "AQEval": "github.com/karlropkins/AQEval @ eccaecebdf90e3e65af77f6e876afe12395a0baa, R/find.near.R + R/calculate.stats.R",
+    "OpenStreetMap": "stand-in, not upstream source: bbox echoed back, no tiles",
     "aqeval_sha": "eccaecebdf90e3e65af77f6e876afe12395a0baa"
   },
   "packages": {
@@ -24,7 +25,8 @@
     "AQEval": "0.0.0.9000",
     "mgcv": "1.9.4",
     "cluster": "2.1.8.3",
-    "sf": "1.1.2"
+    "sf": "1.1.2",
+    "leaflet": "2.2.3"
   },
-  "n_cases": 1
+  "n_cases": 66
 }

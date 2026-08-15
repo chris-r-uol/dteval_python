@@ -87,6 +87,52 @@ plotnine implements the same grammar as ggplot2, so `theme_bw`, faceting and
 the hue palette carry across. Note it cannot render the HTML in the labels, so
 `draw()` unwraps them to plain text (`NO2`, `μg.m^-3`).
 
+## Maps
+
+Both maps follow the same rule as the plots: the backend describes, the client
+draws. Neither fetches tiles.
+
+`tube_map` returns a `TubePlot` with three extra keys in its spec — the tube
+layers are exactly as above:
+
+```python
+spec = dte.tube_map(d).to_spec()
+spec["basemap"]    # {"provider": "esri", "projection": "WGS84", "bbox": {...}}
+spec["limits"]     # {".longitude": [lo, hi], ".latitude": [lo, hi]}
+spec["blank_axes"] # True -- a map has no axis furniture
+```
+
+Point your tile layer at `bbox` and draw the layers over it.
+
+`leaflet_tube_map` returns a `LeafletMap`, which is an ordered list of leaflet
+calls — feed it straight to leaflet.js, or translate the four methods to
+maplibre:
+
+```python
+dte.leaflet_tube_map(d, **{"point.color": ".value", "point.radius": 4}).to_spec()
+```
+
+```jsonc
+{
+  "calls": [
+    {"method": "addProviderTiles", "args": {"provider": "CartoDB.Positron"}},
+    {"method": "addCircleMarkers",
+     "args": {"lng": [...], "lat": [...], "radius": 4,
+              "color": ["#F67647", "#F8854D", "..."],
+              "fillColor": ["#F67647", "..."]}}
+  ]
+}
+```
+
+The colours are computed here rather than left to the client, because
+`leaflet::colorNumeric` interpolates in CIE Lab and a naive sRGB ramp is
+visibly different. `plot_type="surface"` adds `addRasterImage`, `addLegend`,
+and one `addPolylines` plus `addLabelOnlyMarkers` per contour level.
+
+With `dteval[plots]` installed, `LeafletMap.draw()` returns a folium map and
+`.save("map.html")` writes it — but for a Svelte frontend the spec is the
+better interface.
+
 ## Shapes to expect
 
 | function | returns |
@@ -94,6 +140,10 @@ the hue palette carry across. Note it cannot render the HTML in the labels, so
 | `tag_tube`, `calc_tube_stat`, `deseason_tube_data`, `cluster_tube_data`, `fit_tube_model`, `tube_in_xy_polygon`, `tube_annual_cover` | `DataFrame` |
 | `tube_summary`, `tube_summary_sample` | one-row / small `DataFrame` |
 | `test_tube_precision` | `{"data": DataFrame, "plot": TubePlot, "lookup": DataFrame, "report": str}` |
+| `test_tube_accuracy` | as above, plus `"all"`: every date-matched pair, not just those inside `max_distance` |
+| `test_tube_meta` | `TubePlot` |
+| `tube_map` | `TubePlot` (with `basemap` / `limits` in its spec) |
+| `leaflet_tube_map` | `LeafletMap` |
 
 `report` is a preformatted human-readable string, reproduced from R
 character-for-character — fine to show verbatim in a UI.

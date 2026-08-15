@@ -13,12 +13,13 @@ import numpy as np
 import pandas as pd
 
 from dteval.calc import calc_tube_stat
+from dteval.gam import fit_tensor_gam
 from dteval.handlers import DTEvalError, check_tube_data
 from dteval.loess import r_loess
 from dteval.rcompat.stats import r_mean
 from dteval.tagging import tag_tube_required
 
-__all__ = ["fit_tube_model", "fit_tube_model_loess"]
+__all__ = ["fit_tube_model", "fit_tube_model_gam", "fit_tube_model_loess"]
 
 
 def fit_tube_model_loess(
@@ -45,6 +46,37 @@ def fit_tube_model_loess(
     out["..pred"] = np.nan
     out["..pred.se"] = np.nan
     keep = ~np.isnan(np.asarray(target[inputs], dtype="float64")).any(axis=1)
+    out.loc[out.index[keep], "..pred"] = values[keep]
+    out.loc[out.index[keep], "..pred.se"] = stderr[keep]
+    return out
+
+
+def fit_tube_model_gam(
+    data: pd.DataFrame,
+    tube: str,
+    inputs: list[str],
+    new_data: pd.DataFrame | None = None,
+    **kwargs,
+) -> pd.DataFrame:
+    """Port of ``fitTubeModel_gam``.
+
+    R builds ``[tube] ~ te(x1, x2, ...)`` and fits with ``mgcv::gam``. This is
+    the one backend that is close rather than equal to R -- see
+    :mod:`dteval.gam` for what is reproduced and docs/parity.md for the
+    measured deviation.
+    """
+    x = data[inputs].to_numpy(dtype="float64")
+    fit = fit_tensor_gam(x, data[tube].to_numpy(dtype="float64"))
+
+    target = data if new_data is None else new_data
+    out = target.copy()
+    grid = target[inputs].to_numpy(dtype="float64")
+    values, stderr = fit.predict(grid, se=True)
+
+    # As in the loess backend, rows with a missing input stay NA.
+    out["..pred"] = np.nan
+    out["..pred.se"] = np.nan
+    keep = ~np.isnan(grid).any(axis=1)
     out.loc[out.index[keep], "..pred"] = values[keep]
     out.loc[out.index[keep], "..pred.se"] = stderr[keep]
     return out

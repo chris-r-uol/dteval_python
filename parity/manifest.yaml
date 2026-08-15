@@ -458,3 +458,123 @@ cases:
   - id: plot/tubeTimePlot
     r: tubeTimePlot(dt.brd, y = ".value")
     py: dte.tube_time_plot(dte.datasets.dt_brd(), y=".value")
+
+  # --- meta-data handling ---------------------------------------------------
+  - id: meta/padTubeMeta.site
+    r: padTubeMeta(tagTube(dt.brd), "site_name", "site")
+    py: dte.pad_tube_meta(dte.tag_tube(dte.datasets.dt_brd()), "site_name", "site")
+    label_columns: [".sample_id"]
+  - id: meta/extractTubeMeta.site
+    r: extractTubeMeta(tagTube(dt.brd), by = "site")
+    py: dte.extract_tube_meta(dte.tag_tube(dte.datasets.dt_brd()), by="site")
+    label_columns: [".sample_id"]
+  - id: meta/checkTubeMeta.full
+    r: checkTubeMeta(dt.brd, x = "site_name", by = "site", output = "full.report")
+    py: dte.check_tube_meta(dte.datasets.dt_brd(), x="site_name", by="site", output="full.report")
+  - id: meta/addTubeMeta.site
+    r: addTubeMeta(tagTube(dt.brd), ref = extractTubeMeta(tagTube(dt.brd), by = "site"), by = "site")
+    py: dte.add_tube_meta(dte.tag_tube(dte.datasets.dt_brd()), ref=dte.extract_tube_meta(dte.tag_tube(dte.datasets.dt_brd()), by="site"), by="site")
+    label_columns: [".sample_id"]
+  - id: meta/extractAndAddTubeMeta.site
+    r: extractAndAddTubeMeta(tagTube(dt.brd), by = "site", ref = tagTube(dt.brd))
+    py: dte.extract_and_add_tube_meta(dte.tag_tube(dte.datasets.dt_brd()), by="site", ref=dte.tag_tube(dte.datasets.dt_brd()))
+    label_columns: [".sample_id"]
+
+  # --- accuracy -------------------------------------------------------------
+  # aurn.example is the synthetic reference monitor built by
+  # tools/aurn_example.R; see that file for why it is not a fetched data set.
+  # max.distance is widened well past the 10 m default because only one tube
+  # sits on the anchor site, and a four-point regression tests nothing.
+  - id: accuracy/default.data
+    r: testTubeAccuracy(dt.brd, aurn.example, max.distance = 2500, show = character(0))$data
+    py: dte.test_tube_accuracy(dte.datasets.dt_brd(), dte.datasets.aurn_example(), max_distance=2500, show=[])["data"]
+    label_columns: [".sample_id"]
+  - id: accuracy/default.lookup
+    r: testTubeAccuracy(dt.brd, aurn.example, max.distance = 2500, show = character(0))$lookup
+    py: dte.test_tube_accuracy(dte.datasets.dt_brd(), dte.datasets.aurn_example(), max_distance=2500, show=[])["lookup"]
+  - id: accuracy/default.report
+    r: testTubeAccuracy(dt.brd, aurn.example, max.distance = 2500, show = character(0))$report
+    py: dte.test_tube_accuracy(dte.datasets.dt_brd(), dte.datasets.aurn_example(), max_distance=2500, show=[])["report"]
+  - id: accuracy/faceted.lookup
+    r: testTubeAccuracy(dt.brd, aurn.example, max.distance = 2500, facet = ".year", show = character(0))$lookup
+    py: dte.test_tube_accuracy(dte.datasets.dt_brd(), dte.datasets.aurn_example(), max_distance=2500, facet=".year", show=[])["lookup"]
+  - id: accuracy/nearest.only.report
+    r: testTubeAccuracy(dt.brd, aurn.example, max.distance = 2500, nearest.only = TRUE, show = character(0))$report
+    py: dte.test_tube_accuracy(dte.datasets.dt_brd(), dte.datasets.aurn_example(), max_distance=2500, nearest_only=True, show=[])["report"]
+  - id: plot/testTubeAccuracy.plot
+    r: 'testTubeAccuracy(dt.brd, aurn.example, max.distance = 2500, show = character(0))$plot'
+    py: 'dte.test_tube_accuracy(dte.datasets.dt_brd(), dte.datasets.aurn_example(), max_distance=2500, show=[])["plot"]'
+    label_columns: [".sample_id"]
+
+  # --- maps -----------------------------------------------------------------
+  # Compared on layer content, not HTML: see serialize_leaflet() in
+  # parity/serialize.R and compare_leaflet() in parity/compare.py.
+  - id: map/leafletTubeMap.default
+    r: leafletTubeMap(dt.brd)
+    py: dte.leaflet_tube_map(dte.datasets.dt_brd())
+  - id: map/leafletTubeMap.coloured
+    r: 'leafletTubeMap(dt.brd, point.color = ".value", point.radius = 3)'
+    py: 'dte.leaflet_tube_map(dte.datasets.dt_brd(), **{"point.color": ".value", "point.radius": 3})'
+  - id: map/tubeMap.default
+    r: tubeMap(dt.brd)
+    py: dte.tube_map(dte.datasets.dt_brd())
+    label_columns: [".sample_id"]
+  - id: map/tubeMap.faceted
+    r: 'tubeMap(dt.brd, facet = ".year")'
+    py: 'dte.tube_map(dte.datasets.dt_brd(), facet=".year")'
+    label_columns: [".sample_id"]
+
+  # --- annual test ----------------------------------------------------------
+  - id: annual/tubeAnnualTest.pc75
+    r: 'tubeAnnualTest(tubeAnnualCover(dt.brd), test = ".annual.pc > 75", by = ".location")'
+    py: 'dte.tube_annual_test(dte.tube_annual_cover(dte.datasets.dt_brd()), test=".annual.pc > 75", by=".location")'
+    label_columns: [".sample_id"]
+  - id: annual/tubeAnnualTest.site
+    r: 'tubeAnnualTest(tubeAnnualCover(dt.brd), test = ".annual.n > 300", by = "site")'
+    py: 'dte.tube_annual_test(dte.tube_annual_cover(dte.datasets.dt_brd()), test=".annual.n > 300", by="site")'
+    label_columns: [".sample_id"]
+
+  # --- gam surface ----------------------------------------------------------
+  - id: fit/gam.location
+    r: 'fitTubeModel(dt.brd, tube = ".value", inputs = c(".longitude", ".latitude"), model = fitTubeModel_gam)'
+    py: 'dte.fit_tube_model(dte.datasets.dt_brd(), tube=".value", inputs=[".longitude", ".latitude"], model=dte.fit_tube_model_gam)'
+    gating: false
+    reason: >-
+      Structure matches exactly -- columns, column order, row count, and every
+      input column. The fitted surface does not, and this is the one model in
+      the port that is close rather than equal.
+
+      R fits with mgcv::gam(y ~ te(lon, lat)). The port reproduces mgcv's
+      construction directly (cubic-regression-spline marginals, k = 5, knots at
+      quantiles of the unique values, tensor-product basis, one penalty per
+      marginal direction, GCV) but not its optimiser: mgcv uses a nested Newton
+      scheme with its own reparameterisations, and the GCV objective here is
+      very flat near its minimum -- 44.30 at our 24.6 effective degrees of
+      freedom against 44.64 at 19.5. R settles at 22.8 edf inside that same
+      flat region.
+
+      Measured over all 11,273 rows of dt.brd, our fit against R's:
+      median 0.033, p95 0.17, max 1.32 ug/m3, correlation 0.99967. The tube
+      measurement error is around 10%, i.e. ~2.4 ug/m3, so the worst case sits
+      inside it. Pinned by tests/test_gam.py so it cannot drift unnoticed.
+  - id: accuracy/default.radius.report
+    r: testTubeAccuracy(dt.brd, aurn.example, show = character(0))$report
+    py: dte.test_tube_accuracy(dte.datasets.dt_brd(), dte.datasets.aurn_example(), show=[])["report"]
+  - id: accuracy/empty.radius.lookup
+    r: testTubeAccuracy(dt.brd, aurn.example, max.distance = 0, show = character(0))$lookup
+    py: dte.test_tube_accuracy(dte.datasets.dt_brd(), dte.datasets.aurn_example(), max_distance=0, show=[])["lookup"]
+  - id: plot/testTubeMeta.type2
+    r: 'testTubeMeta(dt.brd)'
+    py: 'dte.test_tube_meta(dte.datasets.dt_brd())'
+    row_order_artifact: ["variable", "ref", "..type", "value"]
+    row_order_reason: >-
+      plot.type 2 keeps one stacked segment per group rather than aggregating,
+      and the per-sample segments come out in .sample_id order. That numbering
+      is R's as.numeric(factor(paste(lat, lon, dates))) -- arbitrary, and one of
+      the two things this port derives differently (see the .sample_id note on
+      the precision cases). Segment order within a stacked bar carries no
+      meaning, so the frames are compared as multisets: all 91,110 rows match
+      exactly on variable, ref, value and ..type.
+  - id: plot/testTubeMeta.type1
+    r: 'testTubeMeta(dt.brd, plot.type = 1)'
+    py: 'dte.test_tube_meta(dte.datasets.dt_brd(), plot_type=1)'

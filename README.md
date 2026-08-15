@@ -85,18 +85,25 @@ git diff --exit-code parity/fixtures/
 
 ## Known parity gaps
 
-Two functions diverge from R, both documented in
-[`docs/parity.md`](docs/parity.md), marked non-gating in the manifest, and with
-their measured deviation pinned by tests so it cannot drift unnoticed:
+All 37 exported functions are ported. Three diverge from R numerically, each
+documented in [`docs/parity.md`](docs/parity.md), marked non-gating in the
+manifest, and with its measured deviation pinned by tests so it cannot drift
+unnoticed:
 
 | Area | Reason |
 |---|---|
 | `deseason_tube_data` | R fits LOESS with its default kd-tree *approximation*; we compute the exact local regression. Our fit matches R's own `surface="direct"` to 2e-13 |
 | `cluster_tube_data` | R uses `clara` (PAM on random subsamples, RNG-dependent); we run PAM on the full data. Ours reproduces R's own `pam()` exactly |
-| `tube_map` / `leaflet_tube_map` | not yet ported |
+| `fit_tube_model_gam` | mgcv's construction is reproduced; its smoothing-parameter optimiser is not. The GCV objective is flat near the minimum — median 0.033, max 1.32 µg/m³ |
 
-Both gaps are cases where the port computes the exact answer R's shortcut is
-approximating — with the measurements to show it. Everything else is gated.
+The first two are cases where the port computes the exact answer R's shortcut
+is approximating, with the measurements to show it.
+
+The maps are gated on everything except the basemap: `tube_map` hands the
+client a tile *request* rather than fetching rasters through R's Java tile
+stack, and `leaflet_tube_map` is compared on layer content — 11,273 marker
+positions and colours, exactly — rather than on HTML. Everything else is gated
+at 1e-6 with structure exact.
 
 ## Licence
 

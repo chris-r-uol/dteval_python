@@ -72,11 +72,36 @@ is recorded in `parity/fixtures/_shims.json` and folded into `_lock.json`.
 The shims install into the project-local `.Rlib` only. Delete `.Rlib` and the
 real packages take over if they are ever installed.
 
-`OpenStreetMap` is a separate matter: it is only used for `tubeMap` basemap
-tiles, which are not parity-tested, so when it is unavailable it is relaxed out
-of DTEval's `Imports` at install time. That is safe because the package reaches
-it only through `::`, never through its `NAMESPACE`. The relaxation is recorded
-in `_lock.json`.
+`OpenStreetMap` is a different kind of shim, and the distinction matters. It
+is reached only by `tubeMap`, to fetch ESRI basemap tiles through rJava. The
+port does not fetch tiles at all — it hands the frontend a basemap *request* —
+so there is nothing to compare, and no upstream source worth re-emitting. What
+`tools/build_r_shims.R` installs is a **stand-in**, not a port: `openmap`
+returns the requested bounding box with an empty tile list, and `openproj` is
+the identity. Nothing in it comes from upstream, and `_shims.json` says so.
+
+The point is not to reproduce the basemap but to make everything *around* it
+reproducible: without a stand-in, `tubeMap` cannot run in R here at all, and
+its extent arithmetic, layer structure and limits would go untested. With one,
+they are gated like anything else — and the raster stays out of scope, which it
+would be either way. Read the `map/tubeMap.*` cases with that in mind: they
+prove the plot is assembled as R assembles it, not that the tiles match.
+
+### The reference-monitor data set
+
+`testTubeAccuracy` compares tubes against a co-located continuous analyser, and
+upstream's examples fetch that with `openair::importAURN` — a network call,
+which cannot be a fixture. `tools/aurn_example.R` builds a deterministic
+openair-shaped stand-in instead: hourly NO₂ for 2022–2026 at two sites, one
+placed exactly on a real `dt.brd` tube location so the distance test has a
+match, with a seasonal and a diurnal cycle plus seeded noise.
+
+Both sides read the same generator: `tools/export_datasets.R` ships it to
+Python as `dteval.datasets.aurn_example()`, and `parity/generate.R` sources it
+to put `aurn.example` in scope for the R expressions. The two are identical by
+construction rather than by a file round-trip. The generator saves and restores
+`.Random.seed`, so seeding it does not perturb the RNG stream `clusterTubeData`
+draws from later in the same run.
 
 ### AQEval on the Python side
 
@@ -119,9 +144,15 @@ This replaced a ~480-line port of R's `format.c`. `rcompat/numfmt.py` now holds
 only `signif` (report strings embed `signif(x, 4)`) and a simple
 `as_character` (`.location` renders as `"{lat,lon}"`).
 
-One consequence: `testTubePrecision`'s row order depends on `.sample_id`,
-because R sorts its merge key on the label as text. Those cases canonicalise
-row order before comparing.
+Two consequences, both handled by canonicalising row order before comparing
+(`row_order_artifact` in the manifest):
+
+- `testTubePrecision`'s row order depends on `.sample_id`, because R sorts its
+  merge key on the label as text.
+- `testTubeMeta(plot.type = 2)` keeps one stacked bar segment per group rather
+  than aggregating, and the per-sample segments come out in `.sample_id` order.
+  Segment order within a stacked bar carries no meaning; all 91,110 rows match
+  exactly on `variable`, `ref`, `value` and `..type`.
 
 ### Collation order is a value, not a presentation detail
 
@@ -322,23 +353,76 @@ The divergence is clara-vs-PAM *inside R*. Reproducing it would mean porting
 R's Mersenne-Twister and clara's sampling scheme in order to inherit a worse
 answer.
 
-### `fit_tube_model_gam` — not bit-exact
+### `fit_tube_model_gam` — the optimiser, not the model
 
-`mgcv::gam` with `te()` tensor smooths and GCV/REML smoothing-parameter
-selection has no faithful Python equivalent, and the native-only constraint
-rules out calling R. Implemented natively; structurally correct and numerically
-close, but not bit-exact. Parity is recorded and reported, not enforced.
+`fitTubeModel_gam` fits `[tube] ~ te(lon, lat)` with `mgcv::gam`. `dteval.gam`
+reproduces mgcv's *construction* exactly — cubic-regression-spline marginals
+with `k = 5`, knots at quantiles of the **unique** covariate values, a
+tensor-product basis, one wiggliness penalty per marginal direction, a
+sum-to-zero constraint, and GCV — on numpy and scipy alone.
 
-### `tube_map` — basemap not compared
+What it does not reproduce is mgcv's smoothing-parameter *optimiser*, a nested
+Newton scheme with its own reparameterisations and step control. The GCV
+objective here is very flat near its minimum: **44.30** at our 24.6 effective
+degrees of freedom against **44.64** at 19.5. R settles at 22.8 edf, inside
+that same flat region. Two defensible answers to the same criterion.
 
-`OpenStreetMap::openmap` fetches raster tiles from a different provider stack
-than `contextily`. Only the non-raster plot layers, the bounding box and the
-projection are parity-tested.
+Measured over all 11,273 rows of `dt.brd`, our fitted surface against R's:
 
-### `leaflet_tube_map` — compared structurally
+| | |
+|---|---|
+| median absolute difference | 0.033 µg/m³ |
+| p95 | 0.17 µg/m³ |
+| max | **1.32 µg/m³** |
+| correlation | 0.99967 |
 
-folium and leaflet emit different HTML. Compared on layer contents — marker
-coordinates, palettes, popups, bounds — rather than output markup.
+The worst case sits inside the ~2.4 µg/m³ (10%) measurement error on a
+diffusion tube. The gap is confined to `.value.pred` and `.value.pred.se`:
+every other column matches R exactly, which `tests/test_gam.py` asserts, along
+with the basis properties (the `cr` basis is the identity at its knots, the
+penalty annihilates straight lines, a noiseless tensor surface is recovered to
+1e-6) and the deviation bounds above.
+
+The knot placement was worth finding. mgcv uses quantiles of the *unique*
+values; using quantiles of the raw column instead bunches knots around the
+busiest sites — tube coordinates repeat once per sampling period — and pushed
+the max deviation from 1.32 to 1.73.
+
+### `tube_map` — everything but the tiles
+
+R annotates an `OpenStreetMap` ESRI raster under the plot layers. The port
+issues a basemap *request* instead (`spec["basemap"]`: provider, projection and
+bounding box) and leaves the drawing to the client, which is what a Svelte or
+maplibre frontend wants anyway. Fetching different tiles from a different
+provider would not make the figure more faithful.
+
+Everything else is gated: the `grid.borders` extent arithmetic, the layer
+structure (including that R calls `tubePlot` **twice**, so the tube layers
+appear twice, with `expand_limits`' `geom_blank` between them), the cleared
+axis labels, the zeroed scale expansion and `coord_quickmap`. See the shim note
+above for how the R side is made runnable.
+
+### `leaflet_tube_map` — compared on layer content
+
+leaflet and folium emit different HTML, so the comparison is on what DTEval
+decides: the ordered list of layer calls, and per call the coordinates, radii
+and colours. `parity/serialize.R` names leaflet's positional argument lists per
+method and keeps only those; `compare_leaflet` in `parity/compare.py` checks
+them. The `map/leafletTubeMap.coloured` case compares 11,273 marker positions
+and 11,273 colours exactly.
+
+Two details were needed for that:
+
+- **Colours interpolate in CIE Lab.** `leaflet::colorNumeric` goes through
+  `scales::colour_ramp`, which converts the palette to Lab, interpolates there
+  and converts back. Interpolating in sRGB instead is off by one or two levels
+  per channel — `#F57547` where R gives `#F67647`.
+- **`pretty()` on a flat range differs, deliberately.** The legend breaks use
+  R's `pretty()`, reproduced for any range with width. A *zero-width* range
+  takes a separate branch in R's C code that invents a span around the value
+  (`pretty(c(5, 5))` is `0 5`); the port returns the single value. It only
+  arises for a legend on a perfectly flat fitted surface, where one break is
+  the more useful answer.
 
 ## Figures
 

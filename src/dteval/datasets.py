@@ -21,7 +21,7 @@ import pandas as pd
 
 from dteval.rcompat.rserial import read_rjson
 
-__all__ = ["caz_brd", "data_path", "dt_brd", "dt_calendar"]
+__all__ = ["aurn_example", "caz_brd", "data_path", "dt_brd", "dt_calendar"]
 
 _DATA_DIR = Path(__file__).parent / "data"
 
@@ -54,6 +54,21 @@ def dt_brd() -> pd.DataFrame:
 def dt_calendar() -> pd.DataFrame:
     """The Defra/LAQM diffusion tube sampling calendar, 2015-2026 (144x5)."""
     return _load_frame("dt_calendar").copy()
+
+
+def aurn_example() -> pd.DataFrame:
+    """A synthetic reference-monitor data set, in openair's shape.
+
+    Hourly NO2 at two sites with a winter maximum and a diurnal cycle, one
+    placed exactly on a real ``dt_brd`` tube location. It stands in for
+    ``openair::importAURN`` output, which needs network access and so cannot be
+    a fixture -- this is generated deterministically by
+    ``tools/export_datasets.R`` and shared by both languages.
+
+    Columns: ``date``, ``no2``, ``site``, ``code``, ``source``, ``latitude``,
+    ``longitude``.
+    """
+    return _load_frame("aurn_example").copy()
 
 
 @cache

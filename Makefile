@@ -7,7 +7,7 @@ PY            ?= .venv/bin/python
 
 help:
 	@echo "make r-reference  clone/checkout the pinned upstream DTEval tree"
-	@echo "make r-shims      build minimal loa/AQEval shims (no JDK needed)"
+	@echo "make r-shims      build minimal loa/AQEval/OpenStreetMap shims (no JDK)"
 	@echo "make datasets     re-export bundled datasets from the R .rda files"
 	@echo "make fixtures     regenerate all parity fixtures from live R"
 	@echo "make test         run the full test suite"
@@ -23,7 +23,8 @@ r-reference:
 	@cd $(R_REFERENCE) && git fetch --quiet origin && git checkout --quiet $(UPSTREAM_SHA)
 	@echo "upstream DTEval at $(UPSTREAM_SHA)"
 
-# Minimal loa/AQEval shims so fixtures can be generated without a JDK.
+# Minimal loa/AQEval/OpenStreetMap shims so fixtures can be generated without
+# a JDK.
 # See tools/build_r_shims.R.
 r-shims:
 	Rscript tools/build_r_shims.R

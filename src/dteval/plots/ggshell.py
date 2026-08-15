@@ -207,7 +207,10 @@ def add_geom(
     for name, value in merged.items():
         if name.startswith("..") or name in drops:
             continue
-        if name not in valid:
+        # R computes `drops` as "the caller's arguments the geom does not
+        # accept", so a default the caller never named always survives -- that
+        # is how geom_smooth keeps `method` and `formula`.
+        if name not in valid and name not in defaults:
             continue
         if classes.get(name) == "data":
             mapping[name] = value

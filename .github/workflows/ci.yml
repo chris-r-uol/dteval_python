@@ -97,7 +97,7 @@ jobs:
 
       - name: R packages
         run: |
-          Rscript -e 'p <- c("jsonlite","yaml","data.table","ggplot2","sf","mgcv","cluster");
+          Rscript -e 'p <- c("jsonlite","yaml","data.table","ggplot2","sf","mgcv","cluster","leaflet");
                       m <- p[!p %in% rownames(installed.packages())];
                       if (length(m)) install.packages(m, repos="https://cloud.r-project.org")'
 
@@ -110,9 +110,10 @@ jobs:
       - name: Pinned upstream DTEval
         run: make r-reference
 
-      - name: Build the loa/AQEval shims
+      - name: Build the loa/AQEval/OpenStreetMap shims
         # See tools/build_r_shims.R: the real AQEval needs rJava and hence a
-        # JDK, which none of its two functions actually use.
+        # JDK, which none of its two functions actually use, and OpenStreetMap
+        # needs rJava to fetch basemap tiles that are outside parity scope.
         run: make r-shims
 
       - name: Regenerate every fixture from live R

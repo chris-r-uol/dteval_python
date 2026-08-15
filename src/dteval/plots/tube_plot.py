@@ -54,14 +54,29 @@ class TubePlot:
     fill_palette: list[str] | None = None
     theme: str = "theme_bw"
 
+    # -- map extras, set by tube_map only ----------------------------------
+    #: Axis limits the plot is expanded to, ``{axis_column: [low, high]}``.
+    limits: dict[str, list[float]] | None = None
+    #: The basemap tubeMap asks OpenStreetMap for, but which is not fetched here.
+    basemap: dict[str, Any] | None = None
+    #: ``"coord_quickmap"`` on a map, otherwise the ggplot2 default.
+    coord: str | None = None
+    #: Per-axis scale expansion; maps zero it so the basemap fills the panel.
+    expand: dict[str, list[float]] | None = None
+    #: Maps blank both axes' titles, text and ticks.
+    blank_axes: bool = False
+
     def parity_spec(self) -> dict[str, Any]:
         """Internal form used by the parity comparator (data stays a DataFrame)."""
-        return {
+        out = {
             "labels": dict(self.labels),
             "facet": self.facet,
             "facet_vars": list(self.facet_vars),
             "layers": [layer.to_spec() for layer in self.layers],
         }
+        if self.limits is not None:
+            out["limits"] = {k: [float(v) for v in vs] for k, vs in self.limits.items()}
+        return out
 
     def to_spec(self, orient: str = "columns") -> dict[str, Any]:
         """A JSON-serialisable description of the figure.
@@ -77,7 +92,7 @@ class TubePlot:
         NaN becomes ``None``, timestamps become ISO-8601 strings and categories
         become their labels, so the result survives ``json.dumps`` unchanged.
         """
-        return {
+        spec = {
             "labels": {k: v for k, v in self.labels.items() if v is not None},
             "facet": {"type": self.facet_type, "vars": list(self.facet_vars)}
             if self.facet_vars
@@ -95,6 +110,14 @@ class TubePlot:
                 for layer in self.layers
             ],
         }
+        if self.basemap is not None:
+            # Only tube_map sets these; a client needs them to place the tiles.
+            spec["basemap"] = dict(self.basemap)
+            spec["limits"] = {k: [float(v) for v in vs] for k, vs in (self.limits or {}).items()}
+            spec["coord"] = self.coord
+            spec["expand"] = self.expand
+            spec["blank_axes"] = self.blank_axes
+        return spec
 
     def to_json(self, orient: str = "columns", **kwargs) -> str:
         """:meth:`to_spec` serialised with ``json.dumps``."""
@@ -166,9 +189,12 @@ def tube_plot(
         facets = [facets] if isinstance(facets, str) else list(facets)
         d2 = check_tube_data(d2, facets, n_x=2, if_err="stop<<tubePlot>>facet")
 
-    xargs.setdefault("xlab", x)
-    xargs.setdefault("ylab", y)
-    xargs.setdefault("title", "")
+    if base is None:
+        # Only a fresh plot gets default axis labels. Handed an existing plot,
+        # R leaves xlab/ylab unset and the labs() call below then *clears* the
+        # labels -- which is how tubeMap ends up with unlabelled axes.
+        xargs.setdefault("xlab", x)
+        xargs.setdefault("ylab", y)
 
     types = _resolve_plot_types(plot_type, xargs)
 

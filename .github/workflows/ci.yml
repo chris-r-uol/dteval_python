@@ -155,6 +155,7 @@ jobs:
         # generate.R first: it installs DTEval into the project-local .Rlib,
         # which generate_rcompat.R then needs loadable.
         run: |
+          cp -r parity/fixtures /tmp/committed-fixtures
           Rscript parity/generate.R
           Rscript parity/generate_rcompat.R
 
@@ -169,36 +170,30 @@ jobs:
         run: |
           git diff --stat -- parity/fixtures/_lock.json parity/fixtures/_shims.json || true
 
-      - name: Fixtures must be unchanged
-        # If this fails, either the committed fixtures are stale or live R now
-        # produces different values. Both need a human; neither should pass
-        # silently.
-        #
-        # Note this asserts BYTE identity of the regenerated fixtures, which
-        # also requires this container to agree with the generating machine on
-        # floating-point accumulation -- R sums in long double where the build
-        # has it, and the fixtures carry 17 significant digits. If that is what
-        # fails here, the diff below will show last-digit-only changes, and the
-        # gate should move to the comparator's tolerance rather than bytes.
-        run: |
-          changed=$(git diff --name-only -- parity/fixtures/ \
-                    | grep -v '_lock.json\|_shims.json' || true)
-          if [ -n "$changed" ]; then
-            echo "::error::Regenerated fixtures differ from those committed."
-            echo "$changed"
-            echo "--- first differing fixture, decoded ---"
-            first=$(echo "$changed" | head -1)
-            git show "HEAD:$first" > /tmp/old.json.gz
-            .venv/bin/python - "$first" <<'PY'
-          import gzip, json, sys
-          new = json.load(gzip.open(sys.argv[1]))
-          old = json.load(gzip.open("/tmp/old.json.gz"))
-          print("committed :", json.dumps(old)[:600])
-          print("regenerated:", json.dumps(new)[:600])
-          PY
-            exit 1
-          fi
-          echo "all fixtures byte-identical to those committed"
+      - name: Byte differences (informational)
+        # Byte identity additionally requires this container to agree with the
+        # generating machine on floating-point accumulation -- R sums in
+        # LDOUBLE, so a build with capabilities("long.double") and one without
+        # differ in the last ulp of every group mean. Interesting to see, not
+        # something to fail on; the gate below is the real one.
+        if: always()
+        run: git diff --stat -- parity/fixtures/ || true
+
+      - name: Fixtures must still match under the parity contract
+        # Structure exactly, numbers to 1e-6 -- the same contract the port
+        # claims against R, applied between the committed fixtures and ones
+        # freshly generated here. A changed column, a lost factor level, a
+        # reordered row or a genuinely shifted value all fail; a last-digit
+        # platform difference does not. See parity/compare_fixtures.py.
+        run: .venv/bin/python parity/compare_fixtures.py /tmp/committed-fixtures parity/fixtures
+
+      - name: Keep the regenerated fixtures when they disagree
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regenerated-fixtures
+          path: parity/fixtures/
+          retention-days: 7
 
       - name: Parity suite against the freshly generated fixtures
         run: .venv/bin/python -m pytest -q -m parity

@@ -257,6 +257,30 @@ cases:
   - id: deseason/method1.location
     r: deseasonTubeData(dt.brd, ".value", by = ".location")
     py: dte.deseason_tube_data(dte.datasets.dt_brd(), ".value", by=".location")
+    gating: false
+    reason: >-
+      Structure (columns, order, row count, .value.mean, jd, n, .y) matches
+      exactly; the fitted components do not, and this is the one case where the
+      port deliberately computes something different from R's default.
+
+      R fits with LOESS's default surface="interpolate", a kd-tree
+      approximation of the local regression built for speed. We fit
+      surface="direct", the exact local regression, because scikit-misc's
+      multivariate path is broken and reproducing R's kd-tree means porting
+      ehg128 (339 lines of Fortran).
+
+      The gap is R's approximation error, not ours:
+      tests/test_loess.py::test_direct_surface_matches_r_direct shows our fit
+      matches R's *own* surface="direct" to 2e-13, and
+      test_r_interpolate_is_an_approximation_of_direct measures R's two
+      surfaces differing by up to 2.9 ug/m3 on a 17-point group.
+
+      Against R's default output, measured over all 157 locations:
+      median 0.15, p95 1.2, p99 3.6, max 11.7 ug/m3. The median sits well
+      inside the ~10% (~2.4 ug/m3) measurement error, but the tail does not --
+      it is worst for small groups, where R's kd-tree cells are coarse and R
+      itself warns of near singularities. Non-gating and stated plainly rather
+      than hidden under a tolerance that would have to be ~100% to pass.
 
   # --- fit ------------------------------------------------------------------
   - id: fit/loess.latlon.by.year
@@ -277,6 +301,27 @@ cases:
   - id: cluster/method2.location
     r: clusterTubeData(dt.brd, tube = ".value", by = ".location", clusters = 2, method = 2)
     py: dte.cluster_tube_data(dte.datasets.dt_brd(), tube=".value", by=".location", clusters=2, method=2)
+    gating: false
+    reason: >-
+      Everything up to the clustering matches: the feature matrix (the
+      site-by-site 1 - correlation matrix) agrees with R to 3e-15, and the
+      columns, column order and row count of the result are identical. The
+      cluster assignment differs.
+
+      clusterTubeData calls cluster::clara, which is PAM run on random
+      *subsamples* for speed -- 44 of the 157 sites by default -- so its answer
+      depends on R's RNG stream. The port runs PAM on the full data instead:
+      deterministic, and the exact solution clara approximates.
+
+      This is not the port being worse. Measured in tests/test_cluster.py:
+      our PAM reproduces R's own pam() partition for all 157 sites, and R's
+      clara disagrees with R's own pam() on 100 of them while scoring a worse
+      objective (2.1083 against 2.0964). The divergence is clara-vs-PAM inside
+      R, not Python-vs-R.
+
+      Non-gating because a cluster label cannot be compared to a tolerance and
+      the partitions genuinely differ. Reproducing clara would mean porting R's
+      Mersenne-Twister and clara's sampling scheme to inherit a worse answer.
 
   # --- plots ----------------------------------------------------------------
   # Compared on DTEval's decisions: geom, the exact data handed to each layer,

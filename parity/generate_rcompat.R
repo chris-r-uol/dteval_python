@@ -19,6 +19,8 @@ invisible(Sys.setlocale("LC_NUMERIC", "C"))
 suppressPackageStartupMessages(library(jsonlite))
 
 root <- getwd()
+# DTEval is installed into the project-local library by parity/generate.R.
+.libPaths(c(file.path(root, ".Rlib"), .libPaths()))
 out_dir <- file.path(root, "parity", "fixtures")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 R_REF <- Sys.getenv("DTEVAL_R_REFERENCE", file.path(root, "r_reference"))
@@ -118,6 +120,55 @@ o$qt <- list(df = dfs,
              upper = vapply(dfs, function(v) sprintf("%.17g", qt(0.05/2, df = v, lower.tail = FALSE)), ""),
              lower = vapply(dfs, function(v) sprintf("%.17g", qt(0.05/2, df = v, lower.tail = TRUE)), ""))
 o$qnorm <- list(p = ps, v = vapply(ps, function(v) sprintf("%.17g", qnorm(v)), ""))
+
+# ---- LOESS surfaces -------------------------------------------------------
+# Two references per group: R's "direct" surface (the exact local regression,
+# which dteval._loess_direct implements) and R's default "interpolate" (a
+# kd-tree approximation of it). Recording both lets the tests verify our
+# implementation tightly against `direct`, and separately measure how far R's
+# own approximation sits from it.
+suppressPackageStartupMessages(library(DTEval))
+dd <- tagTubeRequired(d, required = c(".value", ".date", ".location"))
+ss <- calcTubeStat(dd, ".value", by = c(".date", ".location"))
+ss$jd <- as.numeric(format(ss$.date, "%j"))
+ss$n <- as.numeric(ss$.date)
+ss$.y <- ss$.value.mean
+sizes <- table(ss$.location)
+picks <- unlist(lapply(c(6, 17, 24, 43, 48), function(k) {
+  nm <- names(sizes)[which(sizes == k)]
+  if (length(nm)) nm[1] else NULL
+}))
+o$loess_surfaces <- lapply(picks, function(loc) {
+  d2 <- ss[ss$.location == loc, ]
+  row.names(d2) <- seq_len(nrow(d2))
+  mi <- suppressWarnings(loess(.y ~ jd + n, data = d2))
+  md <- suppressWarnings(loess(.y ~ jd + n, data = d2, surface = "direct"))
+  list(n = nrow(d2),
+       jd = sprintf("%.17g", d2$jd),
+       nn = sprintf("%.17g", d2$n),
+       y = sprintf("%.17g", d2$.y),
+       interpolate = sprintf("%.17g", predict(mi)),
+       direct = sprintf("%.17g", predict(md)))
+})
+
+# ---- clustering -----------------------------------------------------------
+# clusterTubeData uses cluster::clara, which is PAM on random subsamples, so its
+# result depends on R's RNG. Record the feature matrix plus BOTH R answers:
+# clara's (what DTEval returns) and pam's (the exact solution clara approximates,
+# and what the port computes).
+suppressPackageStartupMessages(library(cluster))
+cm <- as.matrix(clusterTubeData(d, tube = ".value", by = ".location",
+                                clusters = 2, method = 2, output = "data"))
+cl <- clara(cm, 2, correct.d = TRUE)
+pm <- pam(cm, 2)
+o$cluster <- list(
+  dim = dim(cm),
+  features = sprintf("%.17g", as.vector(cm)),
+  clara = as.integer(cl$clustering),
+  clara_objective = sprintf("%.17g", cl$objective),
+  pam = as.integer(pm$clustering),
+  pam_objective = sprintf("%.17g", pm$objective[["swap"]])
+)
 
 # ---- cut labels and summary(factor) ---------------------------------------
 br <- c(0, 1, 10, 100, 1000, 10000, 100000, 1000000, 10000000)

@@ -271,6 +271,57 @@ fix it — and since `ehg128` is the same kd-tree interpolator the
 `surface="interpolate"` path needs, it would unblock `deseasonTubeData` too.
 That is the single highest-value remaining piece of numerical work.
 
+### `deseason_tube_data` — R's LOESS surface, not ours
+
+Structure matches exactly. The fitted components (`..fit`, `..trend`,
+`..season`, `..deseason`) do not, and this is the one place the port
+deliberately computes something different from R's default.
+
+R fits with LOESS's default `surface="interpolate"`, a kd-tree approximation of
+the local regression built for speed. We fit `surface="direct"`, the exact
+local regression, because `scikit-misc`'s multivariate path is broken and
+reproducing R's kd-tree means porting `ehg128`.
+
+**The gap is R's approximation error, not ours.** `tests/test_loess.py` pins
+both halves: our fit matches R's *own* `surface="direct"` to **2e-13**, and R's
+two surfaces differ from each other by up to **2.9 µg/m³** on a 17-point group.
+
+Against R's default output, over all 157 locations:
+
+| | µg/m³ |
+|---|---|
+| median | 0.15 |
+| p95 | 1.2 |
+| p99 | 3.6 |
+| max | 11.7 |
+
+The median sits well inside the ~10% (~2.4 µg/m³) measurement error; the tail
+does not. It is worst for small groups, where R's kd-tree cells are coarse
+relative to the data and R itself warns of near singularities. Marked
+non-gating and stated plainly, rather than hidden under a tolerance that would
+have to be ~100% to pass.
+
+### `cluster_tube_data` — PAM, not clara
+
+Everything up to the clustering matches: the site-by-site `1 - correlation`
+feature matrix agrees with R to **3e-15**, and the result's columns, column
+order and row count are identical. The cluster assignment differs.
+
+`clusterTubeData` calls `cluster::clara` — PAM run on random *subsamples* for
+speed, 44 of the 157 sites by default — so its answer depends on R's RNG
+stream. The port runs PAM on the full data: deterministic, and the exact
+solution clara approximates.
+
+Again, not the port being worse. From `tests/test_cluster.py`:
+
+- our PAM reproduces **R's own `pam()`** partition for all 157 sites;
+- R's `clara` disagrees with R's own `pam()` on **100** of them;
+- and scores a worse objective — 2.1083 against 2.0964.
+
+The divergence is clara-vs-PAM *inside R*. Reproducing it would mean porting
+R's Mersenne-Twister and clara's sampling scheme in order to inherit a worse
+answer.
+
 ### `fit_tube_model_gam` — not bit-exact
 
 `mgcv::gam` with `te()` tensor smooths and GCV/REML smoothing-parameter

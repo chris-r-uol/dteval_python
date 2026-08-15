@@ -33,6 +33,10 @@ meta:
     LC_COLLATE: C
     LC_TIME: C
     LC_NUMERIC: C
+    # A UTF-8 LC_CTYPE, resolved by parity/ctype.R to whichever of C.UTF-8 /
+    # en_US.UTF-8 / UTF-8 the machine has. It decides whether dt.brd's
+    # non-ASCII site names survive as characters or become <U+2018> escapes.
+    LC_CTYPE: UTF-8
 
 cases:
   # --- datasets: the port must start from byte-identical inputs -------------

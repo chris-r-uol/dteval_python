@@ -21,6 +21,8 @@ suppressPackageStartupMessages(library(jsonlite))
 root <- getwd()
 # DTEval is installed into the project-local library by parity/generate.R.
 .libPaths(c(file.path(root, ".Rlib"), .libPaths()))
+source(file.path(root, "parity", "ctype.R")); dte_pin_ctype()
+
 out_dir <- file.path(root, "parity", "fixtures")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 R_REF <- Sys.getenv("DTEVAL_R_REFERENCE", file.path(root, "r_reference"))
@@ -31,26 +33,17 @@ d <- env$dt.brd
 
 o <- list()
 
-# ---- number formatting ----------------------------------------------------
-vals <- c(
-  as.numeric(d$latitude), as.numeric(d$longitude),
-  as.numeric(d$bias_adjusted_measurement),
-  as.numeric(d$.start_date), as.numeric(d$.end_date),
-  c(0, -0, 1, -1, 0.5, 2.5, 1/3, pi, exp(1), 1e-20, 1e20, 1e5, 1e15, 1e16,
-    1e-5, 1e-4, 0.1, 0.2, 0.1 + 0.2, 100000.5, 999999.5, 1e100, 1e-100,
-    1e308, 5e-324, 123456789012345678, 1.000000000000001, -1e-300),
-  runif(2000, -1e3, 1e3),
-  rnorm(2000) * 10^sample(-12:12, 2000, TRUE),
-  round(runif(1000, 0, 200), 4), (1:500)/7, 10^(-30:30)
-)
-vals <- unique(vals[is.finite(vals)])
-o$numfmt <- list(
-  bits = sprintf("%a", vals),
-  as_character = as.character(vals),
-  signif4 = sprintf("%a", signif(vals, 4)),
-  signif1 = sprintf("%a", signif(vals, 1)),
-  signif15 = sprintf("%a", signif(vals, 15))
-)
+# ---- number formatting: deliberately not recorded --------------------------
+# There used to be a `numfmt` block here, holding sprintf("%a") bit patterns for
+# ~5500 doubles. It was the reference for a ~480-line port of R's format.c,
+# which went when parity moved to a 1e-6 tolerance (see docs/parity.md). No
+# test has read it since.
+#
+# It could not be portable anyway: sprintf("%a") is the C library's, and glibc
+# and macOS libc disagree on how to render the same double -- glibc writes the
+# smallest denormal as 0x0.0000000000001p-1022 where macOS writes 0x1p-1074.
+# Regenerating on another machine therefore produced ~21,700 spurious
+# differences, drowning the two real ones it was hiding.
 
 # ---- Date formatting, including fractional dates --------------------------
 dd <- c(0, 1, 19000, 19000.5, 18999.5, -0.5, -1.5, 19098.5, 19099.5,

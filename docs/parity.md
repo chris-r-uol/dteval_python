@@ -88,7 +88,8 @@ below depend on how R's C sources were compiled.
 - R 4.6.1, `aarch64-apple-darwin20`, conda-forge build
 - `capabilities("long.double")` is `FALSE` — `LDOUBLE` is 64-bit, so R's
   accumulations are plain double arithmetic
-- Locale pinned to `LC_COLLATE=C`, `LC_TIME=C`, `LC_NUMERIC=C`
+- Locale pinned to `LC_COLLATE=C`, `LC_TIME=C`, `LC_NUMERIC=C` and a UTF-8
+  `LC_CTYPE` (see below)
 
 ### R-side dependency shims
 
@@ -189,6 +190,45 @@ Two consequences, both handled by canonicalising row order before comparing
   than aggregating, and the per-sample segments come out in `.sample_id` order.
   Segment order within a stacked bar carries no meaning; all 91,110 rows match
   exactly on `variable`, `ref`, `value` and `..type`.
+
+### `LC_CTYPE` decides what the data *says*
+
+`LC_COLLATE`, `LC_TIME` and `LC_NUMERIC` were pinned from the start.
+`LC_CTYPE` was not, and it turns out to change fixture content rather than
+formatting — which only surfaced when CI regenerated on Linux and 42 fixtures
+disagreed.
+
+`dt.brd`'s `site_name` contains non-ASCII: real typographic quotes in
+*Outside ‘Vapes and Phones’ shop*, and a stray `0x96` (a cp1252 en-dash that
+was never re-encoded upstream) in *Low Mill, Keighley*. Under a C `LC_CTYPE`,
+`load()` translates those strings to UTF-8 and serialisation then escapes them
+as the literal seven characters `<U+2018>`. Under a UTF-8 `LC_CTYPE` the
+characters survive as themselves. Both are legitimate R behaviour; only one can
+be the fixture, and leaving it to the ambient environment meant the answer
+depended on whose shell ran the generator.
+
+`parity/ctype.R` now pins it to the first available UTF-8 locale (`C.UTF-8` on
+both a current macOS R and the CI container), and is sourced by
+`parity/generate.R`, `parity/generate_rcompat.R` and `tools/export_datasets.R`
+— all three, because the shipped Python datasets are converted by the same
+mechanism and have to agree with the fixtures.
+
+UTF-8 is the pinned choice because the quotes are real characters in the source
+and a frontend rendering `<U+2018>` to a user would be plainly wrong. Note the
+consequence for the `0x96`: it is preserved as U+0096, a C1 control character.
+That is faithful to the source data rather than tidy, which is the right way
+round for a port — `dteval.datasets.dt_brd()` reproduces what upstream has,
+including its encoding damage.
+
+### What is deliberately *not* recorded
+
+`parity/fixtures/_rcompat.json.gz` used to carry a `numfmt` block: `sprintf("%a")`
+bit patterns for ~5,500 doubles, the reference for the ~480-line `format.c`
+port that went when parity moved to 1e-6. Nothing had read it since, and it
+could never be portable — `sprintf("%a")` is the C library's, and glibc renders
+the smallest denormal as `0x0.0000000000001p-1022` where macOS writes
+`0x1p-1074`. It produced ~21,700 spurious differences on regeneration,
+drowning the two real ones. Removed.
 
 ### Collation order is a value, not a presentation detail
 

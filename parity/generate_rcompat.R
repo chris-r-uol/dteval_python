@@ -127,6 +127,11 @@ o$qnorm <- list(p = ps, v = vapply(ps, function(v) sprintf("%.17g", qnorm(v)), "
 # kd-tree approximation of it). Recording both lets the tests verify our
 # implementation tightly against `direct`, and separately measure how far R's
 # own approximation sits from it.
+if (!requireNamespace("DTEval", quietly = TRUE)) {
+  stop("DTEval is not installed. parity/generate.R installs it into .Rlib, so\n",
+       "  run that first -- `make fixtures` does both in the right order.",
+       call. = FALSE)
+}
 suppressPackageStartupMessages(library(DTEval))
 dd <- tagTubeRequired(d, required = c(".value", ".date", ".location"))
 ss <- calcTubeStat(dd, ".value", by = c(".date", ".location"))

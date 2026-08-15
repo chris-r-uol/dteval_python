@@ -1,5 +1,7 @@
 # dteval — Python port of the DTEval R package
 
+[![CI](https://github.com/chris-r-uol/dteval_python/actions/workflows/ci.yml/badge.svg)](https://github.com/chris-r-uol/dteval_python/actions/workflows/ci.yml)
+
 A Python port of [DTEval](https://github.com/karlropkins/DTEval), Karl Ropkins'
 R package for pre-processing, analysis and evaluation of diffusion tube (DT)
 data collected in air quality assessment exercises.
@@ -75,13 +77,26 @@ pytest will try to collect them.
 pytest -m parity
 ```
 
-To regenerate the fixtures from R (requires R plus the upstream dependencies):
+To regenerate the fixtures from R (requires R; `make fixtures` clones the
+pinned upstream SHA and builds the dependency shims first):
 
 ```bash
-make r-reference        # clone the pinned upstream SHA
-Rscript parity/generate.R
-git diff --exit-code parity/fixtures/
+make fixtures
 ```
+
+To check regenerated fixtures against the committed ones, use the parity
+contract rather than a byte diff:
+
+```bash
+python parity/compare_fixtures.py <committed-copy> parity/fixtures
+```
+
+`git diff parity/fixtures/` is worth a look but is not the test. Byte identity
+of 17-significant-digit doubles also requires two machines to agree on
+floating-point accumulation, and R sums in `LDOUBLE` — so the same R source on
+the same data differs in the last ulp between a build with
+`capabilities("long.double")` and one without. `compare_fixtures.py` applies
+what the project actually claims: structure exactly, numbers to 1e-6.
 
 ## Known parity gaps
 

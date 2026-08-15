@@ -15,8 +15,33 @@ with the measured size of the gap.
 | Comparison | `parity/compare.py` — exact by default; a tolerance requires a documented `reason` |
 | Staleness | `parity/fixtures/_lock.json` records the upstream SHA and R-source hash; CI regenerates and fails on drift |
 
-Doubles must match **bit for bit**. `%.17g` round-trips every IEEE double, so
-"the same number" means the same 64 bits, not "close enough".
+**Numbers are compared to a relative tolerance of 1e-6; structure is compared
+exactly.**
+
+That split is deliberate. Diffusion tube NO₂ measurements carry roughly a **10%
+error bar**, so agreeing with R to the last bit is about 14 orders of margin on
+something the instrument cannot resolve — and chasing it costs real complexity:
+transliterated Fortran, Python-loop accumulation, and floating-point behaviour
+coupled to the platform. 1e-6 sits ~4 orders inside the measurement error and
+~3 orders outside any realistic bug (a wrong formula, subset or grouping shows
+up at 1e-3 or larger).
+
+What is **not** relaxed is anything that changes the answer rather than its
+last digits:
+
+- column names and order, row count and row order, dtypes
+- factor levels *and their order*
+- the NA-vs-NaN distinction
+- every integer, string, date and boolean — including the report strings
+
+About **56% of compared cells are non-float**, so no tolerance touches them at
+all.
+
+An earlier revision did enforce bit-exactness. That is what surfaced R's
+two-pass `mean`, the FMA contraction in its `var` loop, and the need for
+hand-ported `qnorm`/`qt` — roughly 520 lines of transliteration, since removed.
+The structural findings it produced (below) were kept; they matter at any
+tolerance.
 
 ## Pinned environment
 
@@ -72,17 +97,29 @@ merely close.
 
 These are not incidental; each one silently changes output values if ignored.
 
-### `as.character(double)` uses 15 significant digits
+### `.sample_id` — grouping reproduced, numbering not
 
-Not shortest-round-trip like Python's `repr`. This is load-bearing rather than
-cosmetic: `tagTubeSampleID` builds a grouping key by pasting latitude,
-longitude and dates together and takes `as.numeric(factor(...))`, so a
-one-digit difference in the string changes the grouping and shifts every
-`.sample_id`. `tagTubeLocation` builds `.location` the same way.
+R builds the key by pasting latitude, longitude and the two dates into a
+string and taking `as.numeric(factor(...))`. Its integers therefore depend on
+how R formats a double (15 significant digits, not Python's shortest
+round-trip) *and* on collation order.
 
-Ported in `rcompat/numfmt.py` from R's `scientific()` / `formatReal()` /
-`EncodeRealDrop0()`. Verified exact on 67,454 values including every value in
-`dt.brd`.
+We group on the `(lat, lon, start, end)` **tuple** directly — no string round
+trip, so nothing depends on float formatting. The replicate sets are identical;
+the integer labels are not necessarily the same.
+
+The parity suite checks this properly rather than ignoring the column:
+`label_columns` verifies the induced **partition** matches R's as a bijection —
+two rows share a label here exactly when they share one in R — so a genuine
+mis-grouping still fails.
+
+This replaced a ~480-line port of R's `format.c`. `rcompat/numfmt.py` now holds
+only `signif` (report strings embed `signif(x, 4)`) and a simple
+`as_character` (`.location` renders as `"{lat,lon}"`).
+
+One consequence: `testTubePrecision`'s row order depends on `.sample_id`,
+because R sorts its merge key on the label as text. Those cases canonicalise
+row order before comparing.
 
 ### Collation order is a value, not a presentation detail
 

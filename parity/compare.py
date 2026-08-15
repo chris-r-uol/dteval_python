@@ -1,9 +1,20 @@
 """Read R fixtures and compare Python results against them with R semantics.
 
-Bit-exactness is the default. Doubles are serialised by ``parity/serialize.R``
-as ``%.17g`` strings, which round-trip exactly, so "the same number" means the
-same 64 bits -- not "close enough". A tolerance is only ever applied when the
-manifest states one *and* gives a reason.
+Numbers are compared to a relative tolerance of :data:`DEFAULT_TOL`; structure
+is compared exactly.
+
+That split is deliberate. Diffusion tube NO2 measurements carry roughly a 10%
+error bar, so agreeing with R to the last bit is ~14 orders of margin on
+something the instrument cannot resolve, and chasing it costs real complexity
+(transliterated Fortran, platform-coupled floating point). 1e-6 still sits ~4
+orders inside the measurement error and ~3 orders outside any realistic bug --
+a wrong formula, subset or grouping shows up at 1e-3 or larger.
+
+What is *not* relaxed is anything that changes the answer rather than its last
+digits: column names and order, row count and row order, dtypes, factor levels
+and their order, the NA/NaN distinction, and every integer, string, date and
+boolean. Those are correctness, not precision -- and about 56% of compared
+cells are non-float, so no tolerance touches them at all.
 
 What counts as a difference
 ---------------------------
@@ -30,6 +41,11 @@ import pandas as pd
 from dteval.rcompat.rserial import load_value
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
+
+#: Relative tolerance for comparing floats. See the module docstring for why
+#: this is not zero. Individual cases may tighten or loosen it via
+#: `tol` / `tol_columns` in the manifest.
+DEFAULT_TOL = 1e-6
 
 class ParityError(AssertionError):
     """Raised when a Python result does not match its R fixture."""
@@ -149,15 +165,17 @@ def compare_series(
 def _tol_for(column: str, tol: float | None, tol_columns) -> float | None:
     """Resolve the tolerance for one column.
 
-    ``tol_columns`` may be a list -- every named column gets ``tol`` -- or a
-    mapping, when different columns need different bounds (a LOESS fit and its
-    standard error, say). Columns not named are compared exactly.
+    Every float column gets ``tol`` (the case's, or :data:`DEFAULT_TOL`).
+    ``tol_columns`` *overrides* that for named columns -- as a list, they all
+    take the case's ``tol``; as a mapping, each takes its own bound, which is
+    how a LOESS fit and its much weaker standard error sit in the same case.
     """
+    base = DEFAULT_TOL if tol is None else tol
     if tol_columns is None:
-        return tol
+        return base
     if isinstance(tol_columns, dict):
-        return tol_columns.get(column)
-    return tol if column in tol_columns else None
+        return tol_columns.get(column, DEFAULT_TOL)
+    return base if column in tol_columns else DEFAULT_TOL
 
 
 def compare_frame(
@@ -202,6 +220,8 @@ def compare_ggplot(
     rep: Report,
     tol: float | None,
     tol_columns: set[str] | None = None,
+    row_order_artifact: list[str] | None = None,
+    label_columns: list[str] | None = None,
 ) -> None:
     """Compare a figure on DTEval's decisions, not on rendered pixels.
 
@@ -260,9 +280,14 @@ def compare_ggplot(
         if exp_aes != got_aes:
             rep.add(f"{lp}.aes_params", f"R={exp_aes} python={got_aes}")
 
-        compare_frame(
-            load_value(el["data"]), gl.get("data"), f"{lp}.data", rep, tol, tol_columns
+        # Layer data is usually the same frame the case returns, so it needs
+        # the same row-order and label handling.
+        exp_data = load_value(el["data"])
+        got_data = gl.get("data")
+        exp_data, got_data = _prepare(
+            exp_data, got_data, rep, row_order_artifact, label_columns
         )
+        compare_frame(exp_data, got_data, f"{lp}.data", rep, tol, tol_columns)
 
 
 def _as_str_list(v) -> list[str]:
@@ -280,6 +305,37 @@ def _named_map(values, names) -> dict[str, str]:
     vals = _as_str_list(values)
     keys = _as_str_list(names)
     return dict(zip(keys, vals, strict=False))
+
+
+def compare_labels(
+    exp: pd.DataFrame, got: pd.DataFrame, columns: list[str], path: str, rep: Report
+) -> None:
+    """Check a label column induces the same grouping, not the same values.
+
+    ``.sample_id`` numbers replicate sets. R derives its integers by pasting the
+    location and dates into a string and taking ``as.numeric(factor(...))``, so
+    the labels depend on how R formats a double and on collation order; we group
+    on the tuple directly. The sets are the same, the numbering need not be.
+
+    What matters is that the *partition* matches: two rows share a label here
+    exactly when they share one in R. That is checked as a bijection, so a
+    genuine mis-grouping still fails.
+    """
+    for column in columns:
+        if column not in exp.columns or column not in got.columns:
+            continue
+        pairs = pd.DataFrame({"r": exp[column].to_numpy(), "py": got[column].to_numpy()})
+        r_to_py = pairs.groupby("r")["py"].nunique()
+        py_to_r = pairs.groupby("py")["r"].nunique()
+        bad_r = r_to_py[r_to_py > 1]
+        bad_py = py_to_r[py_to_r > 1]
+        if len(bad_r) or len(bad_py):
+            rep.add(
+                f"{path}[{column!r}]",
+                f"grouping differs from R: {len(bad_r)} R label(s) split across "
+                f"several python labels, {len(bad_py)} python label(s) merge "
+                "several R labels",
+            )
 
 
 def canonicalise(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
@@ -306,6 +362,7 @@ def compare(
     tol: float | None = None,
     tol_columns: list[str] | dict[str, float] | None = None,
     row_order_artifact: list[str] | None = None,
+    label_columns: list[str] | None = None,
 ) -> Report:
     """Compare a Python result against a loaded fixture payload.
 
@@ -315,20 +372,42 @@ def compare(
     """
     rep = Report(case_id)
     node = fixture["value"]
+    if tol is None:
+        tol = DEFAULT_TOL
     cols = None
     if tol_columns:
         cols = dict(tol_columns) if isinstance(tol_columns, dict) else set(tol_columns)
 
     if node["type"] == "ggplot":
-        compare_ggplot(node, got, "$", rep, tol, cols)
+        compare_ggplot(node, got, "$", rep, tol, cols, row_order_artifact, label_columns)
         return rep
 
     exp = load_value(node)
-    if row_order_artifact and isinstance(exp, pd.DataFrame) and isinstance(got, pd.DataFrame):
-        exp = canonicalise(exp, row_order_artifact)
-        got = canonicalise(got, row_order_artifact)
-    _compare_any(exp, got, "$", rep, tol, cols)
+    exp, got = _prepare(exp, got, rep, row_order_artifact, label_columns)
+    _compare_any(exp, got, "$", rep, tol, cols, row_order_artifact, label_columns)
     return rep
+
+
+def _prepare(exp, got, rep, row_order_artifact, label_columns):
+    """Canonicalise row order and check label columns, before value comparison."""
+    def one(e, g):
+        if not (isinstance(e, pd.DataFrame) and isinstance(g, pd.DataFrame)):
+            return e, g
+        if row_order_artifact:
+            e, g = canonicalise(e, row_order_artifact), canonicalise(g, row_order_artifact)
+        if label_columns:
+            compare_labels(e, g, label_columns, "$", rep)
+            keep = [c for c in e.columns if c not in label_columns]
+            e, g = e[keep], g[[c for c in g.columns if c not in label_columns]]
+        return e, g
+
+    if isinstance(exp, dict) and isinstance(got, dict):
+        out_e, out_g = dict(exp), dict(got)
+        for key in exp:
+            if key in got:
+                out_e[key], out_g[key] = one(exp[key], got[key])
+        return out_e, out_g
+    return one(exp, got)
 
 
 def _compare_any(
@@ -338,12 +417,16 @@ def _compare_any(
     rep: Report,
     tol: float | None,
     tol_columns: set[str] | None = None,
+    row_order_artifact: list[str] | None = None,
+    label_columns: list[str] | None = None,
 ) -> None:
     # A ggplot nested inside a result list (e.g. testTubePrecision's `plot`)
     # stays a raw node, so route it to the figure comparator rather than
     # treating it as a named list.
     if isinstance(exp, dict) and exp.get("type") == "ggplot":
-        compare_ggplot(exp, got, path, rep, tol, tol_columns)
+        compare_ggplot(
+            exp, got, path, rep, tol, tol_columns, row_order_artifact, label_columns
+        )
         return
     if exp is None:
         if got is not None:
@@ -368,7 +451,10 @@ def _compare_any(
             if k not in got:
                 rep.add(f"{path}.{k}", "missing from Python result")
                 continue
-            _compare_any(v, got[k], f"{path}.{k}", rep, tol, tol_columns)
+            _compare_any(
+                v, got[k], f"{path}.{k}", rep, tol, tol_columns,
+                row_order_artifact, label_columns,
+            )
     elif isinstance(exp, np.ndarray):
         g = np.asarray(got)
         if exp.shape != g.shape:

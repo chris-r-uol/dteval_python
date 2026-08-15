@@ -63,6 +63,7 @@ def test_parity(case: dict) -> None:
         tol=tol,
         tol_columns=case.get("tol_columns"),
         row_order_artifact=case.get("row_order_artifact"),
+        label_columns=case.get("label_columns"),
     )
 
     if not report.ok:

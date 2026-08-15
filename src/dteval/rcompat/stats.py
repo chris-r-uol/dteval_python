@@ -1,12 +1,21 @@
 """R statistical primitives used by DTEval.
 
-Most of these agree with numpy/scipy defaults; they are wrapped anyway so the
-assumption is written down once and tested against R, rather than assumed at
-each of the dozens of call sites.
+Thin wrappers over numpy/scipy, so R's conventions are written down once rather
+than assumed at each of the dozens of call sites. What they capture is
+*semantics*, not the last bit:
 
-The one that genuinely differs is :func:`r_cut`, whose interval labels are
-built with C's ``%.*g`` at ``dig.lab`` digits -- which is why R's break labels
-read ``(100,1e+03]`` rather than ``(100,1000]``.
+* ``sd``/``var`` use the n-1 denominator and give ``NA`` below two values;
+* ``quantile`` is type 7 (R's default), which is numpy's ``linear``;
+* ``median`` averages the two middle values;
+* ``cut`` builds its interval labels with C's ``%.*g`` at ``dig.lab`` digits,
+  which is why R's break labels read ``(100,1e+03]`` and not ``(100,1000]``.
+
+Earlier revisions reproduced R's floating-point *arithmetic* as well -- its
+two-pass mean, the FMA contraction in its variance loop, hand-ported ``qnorm``
+and ``qt``. That bought agreement in the 16th digit on measurements carrying a
+10% error bar, at the cost of ~520 lines of transliterated Fortran, Python-loop
+accumulation and a dependence on ``long double`` being 64-bit. It was dropped;
+see docs/parity.md.
 """
 
 from __future__ import annotations
@@ -15,9 +24,9 @@ import math
 
 import numpy as np
 import pandas as pd
+from scipy import stats as _sps
 
 from dteval.rcompat.numfmt import signif
-from dteval.rcompat.rmath import qnorm, qt
 
 __all__ = [
     "is_finite",
@@ -40,38 +49,10 @@ def _clean(x, na_rm: bool) -> np.ndarray:
     return a[~np.isnan(a)] if na_rm else a
 
 
-def _seq_sum(a: np.ndarray) -> float:
-    """Left-to-right summation, as C does it.
-
-    numpy's ``sum`` uses pairwise summation, which is more accurate than a
-    plain loop and therefore *disagrees with R in the last ulp*. ``cumsum``
-    accumulates sequentially, matching R's C loop exactly.
-    """
-    if a.size == 0:
-        return 0.0
-    return float(np.cumsum(a)[-1])
-
-
 def r_mean(x, na_rm: bool = False) -> float:
-    """R's ``mean()`` -- port of ``rsum`` in ``src/main/summary.c``.
-
-    R does not compute ``sum(x)/n``. It computes that, then makes a second pass
-    to correct the accumulated rounding error:
-
-        s = sum(x)/n;  if finite:  s += sum(x - s)/n
-
-    Skipping the correction changes the last bit of nearly every group mean,
-    which then propagates through every downstream statistic.
-    """
+    """R's ``mean()``."""
     a = _clean(x, na_rm)
-    n = a.size
-    if n == 0:
-        return np.nan
-    s = _seq_sum(a) / n
-    if math.isfinite(s):
-        t = _seq_sum(a - s)
-        s = s + t / n
-    return float(s)
+    return float(np.mean(a)) if a.size else np.nan
 
 
 def r_median(x, na_rm: bool = False) -> float:
@@ -79,52 +60,19 @@ def r_median(x, na_rm: bool = False) -> float:
     a = _clean(x, na_rm)
     if a.size == 0 or np.isnan(a).any():
         return np.nan
-    a = np.sort(a)
-    n = a.size
-    half = (n + 1) // 2
-    if n % 2 == 1:
-        return float(a[half - 1])
-    return r_mean(a[half - 1 : half + 1])
+    return float(np.median(a))
 
 
 def r_var(x, na_rm: bool = False) -> float:
-    """R's ``var()`` -- the two-pass form from ``src/library/stats/src/cov.c``.
-
-    It reuses the *refined* mean (:func:`r_mean`), then accumulates squared
-    deviations and divides by ``n - 1``.
-
-    The accumulation uses :func:`math.fma` deliberately. R's inner loop is
-    ``sum += (LDOUBLE)(x[k] - xm) * (x[k] - xm)``, which the C compiler
-    contracts into a single fused multiply-add under the default
-    ``-ffp-contract=on``. An FMA rounds once where a separate multiply and add
-    round twice, so writing it the obvious way disagrees with R in the last ulp
-    on roughly a fifth of real replicate groups.
-
-    Measured against R 4.6.1 (conda, aarch64) -- see
-    ``tests/test_rcompat_stats.py``, which re-checks both figures:
-
-    * DTEval's actual domain (2875 co-located replicate groups from ``dt.brd``,
-      n = 2/3/5): FMA matches **2875/2875**, plain sequential only 2262.
-    * An adversarial synthetic set (n up to 60, values spanning 13 orders of
-      magnitude): FMA matches 312/400 and sequential 367/400, with 6 samples
-      matching neither. At that size the compiled loop evidently takes a
-      different shape, so 1-ulp disagreement is possible for wide-ranging
-      inputs with large n. ``docs/parity.md`` records this.
-    """
+    """R's ``var()`` -- the n-1 denominator, ``NA`` below two values."""
     a = _clean(x, na_rm)
-    n = a.size
-    if n < 2:
+    if a.size < 2:
         return np.nan
-    xm = r_mean(a)
-    total = 0.0
-    for v in a.tolist():
-        d = v - xm
-        total = math.fma(d, d, total)
-    return float(total / (n - 1))
+    return float(np.var(a, ddof=1))
 
 
 def r_sd(x, na_rm: bool = False) -> float:
-    """R's ``sd()`` -- ``sqrt(var(x))``, ``NA`` for fewer than two values."""
+    """R's ``sd()`` -- ``sqrt(var(x))``, ``NA`` below two values."""
     v = r_var(x, na_rm)
     return float(np.sqrt(v)) if v == v else np.nan
 
@@ -140,11 +88,10 @@ def r_max(x, na_rm: bool = False) -> float:
 
 
 def r_quantile(x, probs, na_rm: bool = False, type: int = 7) -> np.ndarray:
-    """R's ``quantile()``, type 7 (R's default).
+    """R's ``quantile()``, type 7 (R's default) -- numpy's ``linear`` method.
 
-    numpy's ``linear`` method is the same quantile mathematically but evaluates
-    it as ``lo + (hi - lo) * h``; R evaluates ``(1 - h) * lo + h * hi``. Those
-    round differently, so the formula is written out R's way here.
+    The wrapper exists to make the type explicit and to reject the other eight
+    loudly rather than silently computing a different quantile.
     """
     if type != 7:
         raise NotImplementedError(
@@ -152,23 +99,9 @@ def r_quantile(x, probs, na_rm: bool = False, type: int = 7) -> np.ndarray:
         )
     a = _clean(x, na_rm)
     probs = np.atleast_1d(np.asarray(probs, dtype="float64"))
-    if a.size == 0:
+    if a.size == 0 or np.isnan(a).any():
         return np.full(probs.shape, np.nan)
-    if np.isnan(a).any():
-        return np.full(probs.shape, np.nan)
-
-    a = np.sort(a)
-    n = a.size
-    index = 1.0 + (n - 1) * probs
-    lo = np.floor(index)
-    hi = np.ceil(index)
-    out = a[(lo - 1).astype("int64")]
-    hi_val = a[(hi - 1).astype("int64")]
-    h = index - lo
-    move = (index > lo) & (hi_val != out)
-    out = out.astype("float64").copy()
-    out[move] = (1 - h[move]) * out[move] + h[move] * hi_val[move]
-    return out
+    return np.quantile(a, probs, method="linear")
 
 
 def is_finite(x) -> np.ndarray:
@@ -177,6 +110,26 @@ def is_finite(x) -> np.ndarray:
     return np.isfinite(a)
 
 
+
+
+def qt(p, df, lower_tail: bool = True) -> np.ndarray:
+    """R's ``qt()``. ``df <= 0`` gives NaN, as R does (with a warning)."""
+    p = np.atleast_1d(np.asarray(p, dtype="float64"))
+    df = np.atleast_1d(np.asarray(df, dtype="float64"))
+    p, df = np.broadcast_arrays(p, df)
+    out = np.full(p.shape, np.nan)
+    ok = np.isfinite(df) & (df > 0)
+    if np.any(ok):
+        out[ok] = _sps.t.ppf(p[ok], df[ok]) if lower_tail else _sps.t.isf(p[ok], df[ok])
+    return out
+
+
+def qnorm(p, mean: float = 0.0, sd: float = 1.0, lower_tail: bool = True) -> np.ndarray:
+    """R's ``qnorm()``."""
+    p = np.atleast_1d(np.asarray(p, dtype="float64"))
+    if lower_tail:
+        return _sps.norm.ppf(p, loc=mean, scale=sd)
+    return _sps.norm.isf(p, loc=mean, scale=sd)
 
 
 def _fmt_g(x: float, digits: int) -> str:

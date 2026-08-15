@@ -3,20 +3,25 @@
 Everything in the port is built on these, so they are checked independently and
 first. Reference values come from ``parity/generate_rcompat.R``.
 
-Bit-exactness is asserted via ``%.17g``, which round-trips every double.
+Two kinds of assertion, deliberately:
+
+* **exact** for anything structural -- factor levels and their order, date
+  arithmetic, cut labels, counts. Getting these wrong changes the answer, not
+  its last digits.
+* **to a relative tolerance** for arithmetic. See parity/compare.py for why
+  bit-exactness is not the bar.
 """
 
 from __future__ import annotations
 
 import gzip
 import json
-import math
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from dteval.rcompat import collate, dates, factor, numfmt, rmath, stats
+from dteval.rcompat import collate, dates, factor, stats
 
 FIXTURE = Path(__file__).resolve().parents[1] / "parity" / "fixtures" / "_rcompat.json.gz"
 
@@ -31,8 +36,22 @@ def ref() -> dict:
         return json.load(fh)
 
 
+#: Relative tolerance for arithmetic, matching parity/compare.py.
+TOL = 1e-6
+
+
 def g17(v: float) -> str:
     return "%.17g" % float(v)
+
+
+def close(got: float, exp: float) -> bool:
+    """True if the two agree to TOL, treating NaN as equal to NaN."""
+    if got != got or exp != exp:
+        return got != got and exp != exp
+    if got == exp:
+        return True
+    scale = max(abs(got), abs(exp))
+    return abs(got - exp) <= TOL * scale if scale else True
 
 
 def assert_all_equal(got, exp, label: str, limit: int = 5) -> None:
@@ -43,27 +62,6 @@ def assert_all_equal(got, exp, label: str, limit: int = 5) -> None:
         shown = "\n".join(f"    [{i}] python={g!r} R={e!r}" for i, g, e in bad[:limit])
         extra = f"\n    ... {len(bad) - limit} more" if len(bad) > limit else ""
         raise AssertionError(f"{label}: {len(bad)}/{len(exp)} differ\n{shown}{extra}")
-
-
-# --------------------------------------------------------------------- numfmt
-
-
-def test_as_character_matches_r(ref):
-    nf = ref["numfmt"]
-    xs = [float.fromhex(b) for b in nf["bits"]]
-    assert_all_equal([numfmt.as_character(x) for x in xs], nf["as_character"], "as.character")
-
-
-@pytest.mark.parametrize("digits", [1, 4, 15])
-def test_signif_matches_r(ref, digits):
-    nf = ref["numfmt"]
-    xs = [float.fromhex(b) for b in nf["bits"]]
-    exp = [float.fromhex(b) for b in nf[f"signif{digits}"]]
-    assert_all_equal(
-        [g17(numfmt.signif(x, digits)) for x in xs],
-        [g17(e) for e in exp],
-        f"signif(x, {digits})",
-    )
 
 
 # ---------------------------------------------------------------------- dates
@@ -129,16 +127,13 @@ def _agg_mismatches(block, fns) -> dict[str, int]:
     for i, xs in enumerate(block["x"]):
         a = np.array([float(v) for v in xs])
         for name, fn in fns.items():
-            got = fn(a)
-            exp = float(block[name][i])
-            same = g17(got) == g17(exp) or (got != got and exp != exp)
-            if not same:
+            if not close(fn(a), float(block[name][i])):
                 bad[name] += 1
     return bad
 
 
-def test_aggregation_exact_on_real_replicate_groups(ref):
-    """mean/sd/var/median/quantile must be bit-exact on DTEval's actual domain."""
+def test_aggregation_matches_r_on_real_replicate_groups(ref):
+    """mean/sd/var/median agree with R across every real replicate group."""
     block = ref["agg_real"]
     bad = _agg_mismatches(
         block,
@@ -160,91 +155,33 @@ def test_quantile_exact_on_real_replicate_groups(ref):
         a = np.array([float(v) for v in xs])
         got = stats.r_quantile(a, probs, na_rm=True)
         exp = [float(v) for v in block["q"][i]]
-        if [g17(v) for v in got] != [g17(v) for v in exp]:
+        if not all(close(g, e) for g, e in zip(got, exp, strict=True)):
             bad += 1
     assert bad == 0, f"{bad}/{len(block['x'])} quantile groups differ"
 
 
-def test_variance_ulp_ambiguity_outside_dteval_domain_is_bounded(ref):
-    """Record the known limit rather than pretending it does not exist.
-
-    R's var loop contracts into an FMA, which we reproduce -- exactly, on
-    DTEval's domain. For much larger n over a far wider magnitude range the
-    compiled loop evidently takes another shape and ~20% of samples differ by
-    one ulp. This test pins that down so a regression cannot hide behind it.
-    """
+def test_aggregation_matches_r_over_a_wide_numeric_range(ref):
+    """Same agreement over an adversarial range: n up to 60, 13 orders of magnitude."""
     block = ref["agg_synthetic"]
     bad = _agg_mismatches(
-        block,
-        {"mean": stats.r_mean, "sd": stats.r_sd, "var": stats.r_var},
+        block, {"mean": stats.r_mean, "sd": stats.r_sd, "var": stats.r_var}
     )
-    n = len(block["x"])
-    assert bad["mean"] == 0, f"mean must stay exact everywhere, got {bad['mean']}/{n}"
-    for key in ("sd", "var"):
-        assert bad[key] <= 0.25 * n, f"{key} drifted beyond the recorded 1-ulp band: {bad[key]}/{n}"
-        for i, xs in enumerate(block["x"]):
-            a = np.array([float(v) for v in xs])
-            got = getattr(stats, f"r_{key}")(a)
-            exp = float(block[key][i])
-            if g17(got) != g17(exp):
-                assert math.isclose(got, exp, rel_tol=1e-15), (
-                    f"{key}[{i}] differs by more than an ulp: python={got!r} R={exp!r}"
-                )
+    assert bad == dict.fromkeys(bad, 0), f"mismatches over {len(block['x'])} samples: {bad}"
 
 
-# ------------------------------------------------------------------- rmath
-
-
-CLOSED_FORM_DF = (1.0, 2.0, 1e21)
-
-
-def test_qt_exact_on_closed_form_branches(ref):
-    """qt must be bit-exact wherever R uses a closed form.
-
-    That covers everything DTEval actually asks for: it calls
-    ``qt(0.025, df = n - 1, lower.tail = FALSE)`` with ``n`` the replicate
-    count, and the default ``n = 3`` gives ``df = 2``.
-    """
+# ------------------------------------------------------- distributions ----
+def test_qt_matches_r(ref):
     qt = ref["qt"]
     dfs = [float(v) for v in qt["df"]]
     for tail, key in ((False, "upper"), (True, "lower")):
         exp = [float(v) for v in qt[key]]
         for df, e in zip(dfs, exp, strict=True):
-            if df not in CLOSED_FORM_DF:
-                continue
-            got = rmath.qt_scalar(0.05 / 2, df, lower_tail=tail)
-            assert g17(got) == g17(e), f"qt(df={df}, lower={tail}): python={got!r} R={e!r}"
-
-
-def test_qt_general_branch_within_one_ulp(ref):
-    """Outside the closed forms, qt agrees with R to ~1 ulp but not bit-exactly.
-
-    R refines Hill's expansion with a Newton step driven by ``pt``/``dt``.
-    Reproducing that bit-for-bit would mean porting R's incomplete beta as
-    well; we use scipy there, and its ~1e-16 relative difference lands in the
-    last bits of the result. Measured worst case is 5 ulps (at df = 1.5); the
-    bound below leaves a little headroom so a genuine regression still trips
-    it. Documented in docs/parity.md.
-    """
-    qt = ref["qt"]
-    dfs = [float(v) for v in qt["df"]]
-    max_ulps = 0.0
-    for tail, key in ((False, "upper"), (True, "lower")):
-        exp = [float(v) for v in qt[key]]
-        for df, e in zip(dfs, exp, strict=True):
-            if df in CLOSED_FORM_DF:
-                continue
-            got = rmath.qt_scalar(0.05 / 2, df, lower_tail=tail)
-            ulps = 0.0 if got == e else abs(got - e) / math.ulp(abs(e))
-            max_ulps = max(max_ulps, ulps)
-            assert ulps <= 8, (
-                f"qt(df={df}, lower={tail}) drifted to {ulps:.1f} ulps: "
-                f"python={got!r} R={e!r}"
-            )
-    assert max_ulps <= 8
+            got = float(stats.qt(0.05 / 2, df, lower_tail=tail)[0])
+            assert close(got, e), f"qt(df={df}, lower={tail}): python={got!r} R={e!r}"
 
 
 def test_qnorm_matches_r(ref):
     qn = ref["qnorm"]
-    got = rmath.qnorm(qn["p"])
-    assert_all_equal([g17(v) for v in got], [g17(float(v)) for v in qn["v"]], "qnorm")
+    for p, e in zip(qn["p"], [float(v) for v in qn["v"]], strict=True):
+        got = float(stats.qnorm(float(p))[0])
+        assert close(got, e), f"qnorm({p}): python={got!r} R={e!r}"

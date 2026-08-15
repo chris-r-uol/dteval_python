@@ -24,11 +24,9 @@ def is_na(values) -> np.ndarray:
 def as_character_series(values, use_format: bool = False) -> pd.Series:
     """R's ``as.character()`` for a vector.
 
-    ``use_format=True`` switches to ``format()`` semantics instead -- common
-    width and ``getOption("digits")`` significant digits, trailing zeros kept.
-    That is what ``as.matrix.data.frame`` applies when ``apply()`` coerces a
-    frame to a character matrix, and it produces different strings from
-    ``as.character`` (``-1.732780`` vs ``-1.73278``).
+    ``use_format`` is accepted for call-site compatibility but no longer
+    switches behaviour: the ``format()`` path existed only so ``.sample_id``'s
+    pasted key matched R byte for byte, and that key is now built from a tuple.
     """
     s = pd.Series(values)
     na = pd.isna(s).to_numpy()
@@ -44,10 +42,7 @@ def as_character_series(values, use_format: bool = False) -> pd.Series:
     elif pd.api.types.is_integer_dtype(s.dtype):
         out = s.map(lambda v: None if pd.isna(v) else str(int(v)))
     elif pd.api.types.is_float_dtype(s.dtype):
-        if use_format:
-            out = pd.Series(numfmt.r_format_numeric(s.to_numpy(dtype="float64")), index=s.index)
-        else:
-            out = s.map(lambda v: None if pd.isna(v) else numfmt.as_character(float(v)))
+        out = s.map(lambda v: None if pd.isna(v) else numfmt.as_character(float(v)))
     else:
         out = s.map(lambda v: None if pd.isna(v) else str(v))
 
@@ -57,28 +52,12 @@ def as_character_series(values, use_format: bool = False) -> pd.Series:
 
 
 def as_matrix_paste(df: pd.DataFrame, sep: str) -> list[str]:
-    """``apply(df, 1, paste, collapse = sep)`` -- with R's coercion rules.
+    """Join each row's values into one string, as ``apply(df, 1, paste)`` does.
 
-    ``apply`` first turns the frame into a character matrix via
-    ``as.matrix.data.frame``, which is *not* ``as.character`` column by column:
-
-    * a factor uses ``as.vector`` -- its labels;
-    * anything else numeric goes through ``format()``, so a column shares one
-      width and one decimal count (``-1.732780``, not ``-1.73278``).
-
-    DTEval builds two different keys this way -- ``.sample_id``
-    (``tag.tube.data.R:571``) and the boxplot's ``..group``
-    (``tube.plots.R:937``) -- and both are values, not labels.
+    Used for the boxplot's ``..group`` key (``tube.plots.R:937``), where the
+    string only has to separate groups consistently -- it is never shown.
     """
-    parts: list[list[str]] = []
-    for col in df.columns:
-        series = df[col]
-        if isinstance(series.dtype, pd.CategoricalDtype):
-            parts.append(list(as_character_series(series).fillna("NA")))
-        elif pd.api.types.is_float_dtype(series.dtype):
-            parts.append(numfmt.r_format_numeric(series.to_numpy(dtype="float64")))
-        else:
-            parts.append(list(as_character_series(series, use_format=True).fillna("NA")))
+    parts = [list(as_character_series(df[col]).fillna("NA")) for col in df.columns]
     return [sep.join(row) for row in zip(*parts, strict=True)]
 
 

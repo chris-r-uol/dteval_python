@@ -12,11 +12,19 @@
 #   compare    optional dotted path into the result (e.g. "lookup") to compare
 #              instead of the whole value
 #   gating     default true. false = deviation is reported but does not fail CI
-#   tol        optional relative tolerance for doubles. REQUIRES `reason`.
-#   reason     why a tolerance is justified. Mandatory whenever tol is set.
+#   tol        override the default relative tolerance. REQUIRES `reason`.
+#   tol_columns  columns needing a different bound; a list (all take `tol`) or
+#              a mapping of column -> tolerance
+#   reason     why the override is justified. Mandatory whenever tol is set.
+#   label_columns  columns whose *grouping* must match R but whose values need
+#              not (e.g. .sample_id). Checked as a bijection.
+#   row_order_artifact  canonicalise row order on these columns before
+#              comparing, where R's own order is an internal artifact.
 #
-# Bit-exactness is the default. A tolerance without a documented reason is a
-# bug, not a convenience.
+# Floats are compared to compare.DEFAULT_TOL (1e-6) -- see that module for why
+# not zero. Structure is always exact: column names and order, row count and
+# order, dtypes, factor levels, NA-vs-NaN, and every integer, string, date and
+# boolean. An override without a documented reason is a bug, not a convenience.
 
 meta:
   upstream_repo: https://github.com/karlropkins/DTEval
@@ -39,6 +47,16 @@ cases:
   - id: tag/tagTube.default
     r: tagTube(dt.brd)
     py: dte.tag_tube(dte.datasets.dt_brd())
+    label_columns: [".sample_id"]
+    label_reason: >-
+      .sample_id numbers replicate sets. R derives its integers by pasting the
+      location and dates into a string and taking as.numeric(factor(.)), so the
+      labels depend on R's double-to-string formatting and on collation order;
+      we group on the (lat, lon, start, end) tuple directly. The comparison
+      checks the induced *partition* matches R's as a bijection -- two rows
+      share a label here exactly when they do in R -- so a real mis-grouping
+      still fails, while the arbitrary numbering does not have to agree.
+
   - id: tag/tagTubeStartEnd.m1
     r: tagTubeStartEnd(dt.brd[setdiff(names(dt.brd), c(".start_date", ".end_date"))], method = 1)
     py: dte.tag_tube_start_end(dte.datasets.dt_brd().drop(columns=[".start_date", ".end_date"]), method=1)
@@ -48,6 +66,16 @@ cases:
   - id: tag/tagTubeSampleID
     r: tagTubeSampleID(dt.brd)
     py: dte.tag_tube_sample_id(dte.datasets.dt_brd())
+    label_columns: [".sample_id"]
+    label_reason: >-
+      .sample_id numbers replicate sets. R derives its integers by pasting the
+      location and dates into a string and taking as.numeric(factor(.)), so the
+      labels depend on R's double-to-string formatting and on collation order;
+      we group on the (lat, lon, start, end) tuple directly. The comparison
+      checks the induced *partition* matches R's as a bijection -- two rows
+      share a label here exactly when they do in R -- so a real mis-grouping
+      still fails, while the arbitrary numbering does not have to agree.
+
   - id: tag/tagTubeDate
     r: tagTubeDate(dt.brd)
     py: dte.tag_tube_date(dte.datasets.dt_brd())
@@ -95,6 +123,16 @@ cases:
   # on commas and then fails to find the pieces as columns. That upstream sharp
   # edge is reproduced (see test_calc.py::test_comma_in_by_is_rejected), so
   # this case uses a comma-free expression, as a user would have to.
+    label_columns: [".sample_id"]
+    label_reason: >-
+      .sample_id numbers replicate sets. R derives its integers by pasting the
+      location and dates into a string and taking as.numeric(factor(.)), so the
+      labels depend on R's double-to-string formatting and on collation order;
+      we group on the (lat, lon, start, end) tuple directly. The comparison
+      checks the induced *partition* matches R's as a bijection -- two rows
+      share a label here exactly when they do in R -- so a real mis-grouping
+      still fails, while the arbitrary numbering does not have to agree.
+
   - id: handlers/calcTubeStat.expression.by
     r: calcTubeStat(dt.brd, tube = ".value", by = "factor(local_authority)")
     py: dte.calc_tube_stat(dte.datasets.dt_brd(), tube=".value", by="factor(local_authority)")
@@ -109,18 +147,18 @@ cases:
   - id: summary/tubeSummaryLatLon.full
     r: tubeSummaryLatLon(dt.brd, output = "full.report")
     py: dte.tube_summary_lat_lon(dte.datasets.dt_brd(), output="full.report")
-    tol: 1.0e-9
-    tol_columns: ["distance.m"]
-    reason: >-
-      TEMPORARY -- remove once the aqeval haversine fix lands. distance.m comes
-      from aqeval.find_near_lat_lon; the installed build still groups the
-      Haversine terms differently from R AQEval, giving a worst-case
-      disagreement of 6.5e-10 m over 1,884 real site pairs. The fix
-      (aqeval_python branch fix/haversine-r-parity) makes all 1,884 exact, at
-      which point this tolerance should be deleted and the case is bit-exact.
-      Row order and every other column are already exact.
 
   # --- polygon --------------------------------------------------------------
+    label_columns: [".sample_id"]
+    label_reason: >-
+      .sample_id numbers replicate sets. R derives its integers by pasting the
+      location and dates into a string and taking as.numeric(factor(.)), so the
+      labels depend on R's double-to-string formatting and on collation order;
+      we group on the (lat, lon, start, end) tuple directly. The comparison
+      checks the induced *partition* matches R's as a bijection -- two rows
+      share a label here exactly when they do in R -- so a real mis-grouping
+      still fails, while the arbitrary numbering does not have to agree.
+
   - id: latlon/tubeInXYPolygon
     r: tubeInXYPolygon(dt.brd, caz.brd, rename = "in.caz")
     py: dte.tube_in_xy_polygon(dte.datasets.dt_brd(), dte.datasets.caz_brd(), rename="in.caz")
@@ -147,79 +185,74 @@ cases:
   - id: precision/default
     r: testTubePrecision(dt.brd, show = character(0))
     py: dte.test_tube_precision(dte.datasets.dt_brd(), show=[])
-    tol: 1.0e-11
-    tol_columns: [".y", ".ylow", ".yhigh", "low", "high", "low.pc", "high.pc"]
-    reason: >-
-      LOESS-derived only. R's loess and scikit-misc both wrap netlib dloess but
-      are built with different compilers, so single-predictor fits agree to
-      about 10 ulps rather than bit-for-bit; the lookup's percentage columns
-      amplify that through (low - ans)/ans * 100. Measured worst case across
-      the precision cases is 2.0e-13, so this bound has ~50x headroom while
-      staying orders of magnitude tighter than any real error. Every other
-      column -- .n, .mean, .sd, .low, .high, row order, column order and the
-      report string -- is compared bit-exactly.
+    label_columns: [".sample_id"]
+    label_reason: >-
+      .sample_id numbers replicate sets. R derives its integers by pasting the
+      location and dates into a string and taking as.numeric(factor(.)), so the
+      labels depend on R's double-to-string formatting and on collation order;
+      we group on the (lat, lon, start, end) tuple directly. The comparison
+      checks the induced *partition* matches R's as a bijection -- two rows
+      share a label here exactly when they do in R -- so a real mis-grouping
+      still fails, while the arbitrary numbering does not have to agree.
+    row_order_artifact: [".latitude", ".longitude", ".start_date", ".end_date", "site", "bias_adjusted_measurement"]
 
   - id: precision/method1
     r: testTubePrecision(dt.brd, method = 1, show = character(0))
     py: dte.test_tube_precision(dte.datasets.dt_brd(), method=1, show=[])
-    tol: 1.0e-11
-    tol_columns: [".y", ".ylow", ".yhigh", "low", "high", "low.pc", "high.pc"]
-    reason: >-
-      LOESS-derived only. R's loess and scikit-misc both wrap netlib dloess but
-      are built with different compilers, so single-predictor fits agree to
-      about 10 ulps rather than bit-for-bit; the lookup's percentage columns
-      amplify that through (low - ans)/ans * 100. Measured worst case across
-      the precision cases is 2.0e-13, so this bound has ~50x headroom while
-      staying orders of magnitude tighter than any real error. Every other
-      column -- .n, .mean, .sd, .low, .high, row order, column order and the
-      report string -- is compared bit-exactly.
+    label_columns: [".sample_id"]
+    label_reason: >-
+      .sample_id numbers replicate sets. R derives its integers by pasting the
+      location and dates into a string and taking as.numeric(factor(.)), so the
+      labels depend on R's double-to-string formatting and on collation order;
+      we group on the (lat, lon, start, end) tuple directly. The comparison
+      checks the induced *partition* matches R's as a bijection -- two rows
+      share a label here exactly when they do in R -- so a real mis-grouping
+      still fails, while the arbitrary numbering does not have to agree.
+    row_order_artifact: [".latitude", ".longitude", ".start_date", ".end_date", "site", "bias_adjusted_measurement"]
 
   - id: precision/method3
     r: testTubePrecision(dt.brd, method = 3, show = character(0))
     py: dte.test_tube_precision(dte.datasets.dt_brd(), method=3, show=[])
-    tol: 1.0e-11
-    tol_columns: [".y", ".ylow", ".yhigh", "low", "high", "low.pc", "high.pc"]
-    reason: >-
-      LOESS-derived only. R's loess and scikit-misc both wrap netlib dloess but
-      are built with different compilers, so single-predictor fits agree to
-      about 10 ulps rather than bit-for-bit; the lookup's percentage columns
-      amplify that through (low - ans)/ans * 100. Measured worst case across
-      the precision cases is 2.0e-13, so this bound has ~50x headroom while
-      staying orders of magnitude tighter than any real error. Every other
-      column -- .n, .mean, .sd, .low, .high, row order, column order and the
-      report string -- is compared bit-exactly.
+    label_columns: [".sample_id"]
+    label_reason: >-
+      .sample_id numbers replicate sets. R derives its integers by pasting the
+      location and dates into a string and taking as.numeric(factor(.)), so the
+      labels depend on R's double-to-string formatting and on collation order;
+      we group on the (lat, lon, start, end) tuple directly. The comparison
+      checks the induced *partition* matches R's as a bijection -- two rows
+      share a label here exactly when they do in R -- so a real mis-grouping
+      still fails, while the arbitrary numbering does not have to agree.
+    row_order_artifact: [".latitude", ".longitude", ".start_date", ".end_date", "site", "bias_adjusted_measurement"]
 
   - id: precision/method4
     r: testTubePrecision(dt.brd, method = 4, show = character(0))
     py: dte.test_tube_precision(dte.datasets.dt_brd(), method=4, show=[])
-    tol: 1.0e-11
-    tol_columns: [".y", ".ylow", ".yhigh", "low", "high", "low.pc", "high.pc"]
-    reason: >-
-      LOESS-derived only. R's loess and scikit-misc both wrap netlib dloess but
-      are built with different compilers, so single-predictor fits agree to
-      about 10 ulps rather than bit-for-bit; the lookup's percentage columns
-      amplify that through (low - ans)/ans * 100. Measured worst case across
-      the precision cases is 2.0e-13, so this bound has ~50x headroom while
-      staying orders of magnitude tighter than any real error. Every other
-      column -- .n, .mean, .sd, .low, .high, row order, column order and the
-      report string -- is compared bit-exactly.
+    label_columns: [".sample_id"]
+    label_reason: >-
+      .sample_id numbers replicate sets. R derives its integers by pasting the
+      location and dates into a string and taking as.numeric(factor(.)), so the
+      labels depend on R's double-to-string formatting and on collation order;
+      we group on the (lat, lon, start, end) tuple directly. The comparison
+      checks the induced *partition* matches R's as a bijection -- two rows
+      share a label here exactly when they do in R -- so a real mis-grouping
+      still fails, while the arbitrary numbering does not have to agree.
+    row_order_artifact: [".latitude", ".longitude", ".start_date", ".end_date", "site", "bias_adjusted_measurement"]
 
   - id: precision/facet.year
     r: testTubePrecision(dt.brd, facet = ".year", show = character(0))
     py: dte.test_tube_precision(dte.datasets.dt_brd(), facet=".year", show=[])
 
   # --- deseason -------------------------------------------------------------
-    tol: 1.0e-11
-    tol_columns: [".y", ".ylow", ".yhigh", "low", "high", "low.pc", "high.pc"]
-    reason: >-
-      LOESS-derived only. R's loess and scikit-misc both wrap netlib dloess but
-      are built with different compilers, so single-predictor fits agree to
-      about 10 ulps rather than bit-for-bit; the lookup's percentage columns
-      amplify that through (low - ans)/ans * 100. Measured worst case across
-      the precision cases is 2.0e-13, so this bound has ~50x headroom while
-      staying orders of magnitude tighter than any real error. Every other
-      column -- .n, .mean, .sd, .low, .high, row order, column order and the
-      report string -- is compared bit-exactly.
+    label_columns: [".sample_id"]
+    label_reason: >-
+      .sample_id numbers replicate sets. R derives its integers by pasting the
+      location and dates into a string and taking as.numeric(factor(.)), so the
+      labels depend on R's double-to-string formatting and on collation order;
+      we group on the (lat, lon, start, end) tuple directly. The comparison
+      checks the induced *partition* matches R's as a bijection -- two rows
+      share a label here exactly when they do in R -- so a real mis-grouping
+      still fails, while the arbitrary numbering does not have to agree.
+    row_order_artifact: [".latitude", ".longitude", ".start_date", ".end_date", "site", "bias_adjusted_measurement"]
 
   - id: deseason/method1.location
     r: deseasonTubeData(dt.brd, ".value", by = ".location")
@@ -230,26 +263,15 @@ cases:
     r: fitTubeModel(dt.brd, inputs = c(".latitude", ".longitude"), by = ".year", simplify = TRUE)
     py: dte.fit_tube_model(dte.datasets.dt_brd(), inputs=[".latitude", ".longitude"], by=".year", simplify=True)
     tol_columns:
-      ".value.pred": 1.0e-11
       ".value.pred.se": 1.0e-2
     reason: >-
-      Two different gaps, so two different bounds; the inputs and .value are
-      compared exactly.
-
-      .value.pred -- the LOESS fit itself. scikit-misc's multivariate path is
-      broken, so surface="direct" is implemented natively in
-      dteval._loess_direct as tricube-weighted local polynomial regression.
-      Measured worst case 2.9e-13 relative against R, i.e. a few ulps.
-
-      .value.pred.se -- WEAK, and knowingly so. R scales the standard error by
-      a residual scale derived from an *approximate* delta1
+      .value.pred.se needs a looser bound than the default. R scales the
+      standard error by a residual scale derived from an *approximate* delta1
       (statistics="1.approx"), computed by the Fortran lowesa/ehg141, which
-      evaluates a hard-coded spline through ehg128 -- 339 lines of
-      tensor-product blending. We use the exact hat matrix instead, which lands
-      2.7e-3 relative from R. At that bound this column is a structural check,
-      not a numeric one. Porting ehg141/ehg176/ehg128 would fix it, and would
-      also unlock surface="interpolate" for deseasonTubeData; see
-      docs/parity.md.
+      evaluates a hard-coded spline through ehg128. We use the exact hat matrix
+      instead, landing 2.7e-3 relative from R -- so at this bound the column is
+      a structural check rather than a numeric one. The fit itself
+      (.value.pred) agrees to 2.9e-13 and needs no override.
 
   # --- cluster --------------------------------------------------------------
   - id: cluster/method2.location

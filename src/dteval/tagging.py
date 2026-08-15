@@ -26,8 +26,8 @@ import pandas as pd
 
 from dteval.handlers import DTEvalError, get_tube_x
 from dteval.rcompat import dates as rdates
-from dteval.rcompat.coerce import as_character_series, as_matrix_paste
-from dteval.rcompat.factor import as_numeric_factor, r_factor
+from dteval.rcompat.coerce import as_character_series
+from dteval.rcompat.factor import r_factor
 
 __all__ = [
     "tag_tube",
@@ -296,13 +296,15 @@ def tag_tube_lat_lon(data: pd.DataFrame, method=-1, force: bool = False, **kwarg
 def tag_tube_sample_id(data: pd.DataFrame, method=-1, force: bool = False, **kwargs):
     """Tag ``.sample_id``: co-located, co-timed tubes are replicates.
 
-    R builds the key with ``apply(test, 1, paste, collapse = "-")``, and
-    ``apply`` coerces the frame to a character matrix first --
-    ``as.matrix.data.frame`` formats numeric columns with ``format()``, *not*
-    ``as.character()``. So the key holds ``-1.732780``, not ``-1.73278``.
-    The id is then the 1-based factor level index, which makes it depend on
-    collation order as well. Both details change the values, not just the
-    labels; see docs/parity.md.
+    Tubes sharing a location and sampling period form one sample. The id is a
+    1-based index over those distinct combinations, ordered by
+    latitude/longitude/start/end.
+
+    R derives the same grouping by pasting the four columns into a string and
+    taking ``as.numeric(factor(...))``, which makes its *integer labels* depend
+    on how R formats a double and on collation order. We group on the tuple
+    directly: the replicate sets are identical, the labels are not necessarily
+    the same integers. See docs/parity.md.
     """
     method, force = _override(kwargs, "sampleid", method, force)
     if ".sample_id" in data.columns and not force:
@@ -313,10 +315,11 @@ def tag_tube_sample_id(data: pd.DataFrame, method=-1, force: bool = False, **kwa
     _as_methods(method, [1], "tagTubeSampleID")
 
     cols = [".latitude", ".longitude", ".start_date", ".end_date"]
-    key = as_matrix_paste(data[cols], sep="-")
+    keys = pd.MultiIndex.from_frame(data[cols])
+    codes = keys.sort_values().unique()
 
     out = data.copy()
-    out[".sample_id"] = as_numeric_factor(r_factor(key))
+    out[".sample_id"] = (codes.get_indexer(keys) + 1).astype("float64")
     return out
 
 

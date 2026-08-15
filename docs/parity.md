@@ -1,8 +1,8 @@
 # Parity with the R package
 
 The R package is the definition of correct. This document records how that is
-enforced, and — honestly — the places where bit-exactness is not achievable,
-with the measured size of the gap.
+enforced, where the port deliberately diverges, and the measured size of every
+gap.
 
 ## How parity is enforced
 
@@ -12,7 +12,7 @@ with the measured size of the gap.
 | R side | `parity/generate.R` sources the pinned upstream tree and serialises results |
 | Serialisation | `parity/serialize.R` — `%.17g` doubles (lossless), explicit R classes, factor levels, NA-vs-NaN |
 | Python side | `tests/test_parity.py` evaluates the Python expression and compares |
-| Comparison | `parity/compare.py` — exact by default; a tolerance requires a documented `reason` |
+| Comparison | `parity/compare.py` — floats to 1e-6, structure exact; any override requires a documented `reason` |
 | Staleness | `parity/fixtures/_lock.json` records the upstream SHA and R-source hash; CI regenerates and fails on drift |
 
 **Numbers are compared to a relative tolerance of 1e-6; structure is compared
@@ -89,9 +89,11 @@ Its Haversine originally agreed with R to ~1e-10 m but not bit-for-bit: over
 floating-point details, not a difference in formula — R converts the coordinate
 *difference* from degrees, and associates the second term as
 `sin(dLon/2) * sin(dLon/2) * cos(lat0) * cos(lat1)`. Corrected upstream (branch
-`fix/haversine-r-parity`), all 1,884 now match exactly. `tubeSummaryLatLon`
-returns `distance.m` as an output value, so this had to be exact rather than
-merely close.
+`fix/haversine-r-parity`), all 1,884 now match exactly.
+
+At the current 1e-6 bound the difference is invisible anyway (4e-14 relative),
+so `tubeSummaryLatLon` no longer needs a tolerance for it — but the fix is
+still worth having, since it costs nothing and removes a needless divergence.
 
 ## Findings that shaped the port
 
@@ -123,15 +125,19 @@ row order before comparing.
 
 ### Collation order is a value, not a presentation detail
 
-`factor()` levels are `sort(unique(x))` under the current collation, and
-`.sample_id` is the 1-based level index. Row order of `testTubePrecision` and
-`testTubeAccuracy` output likewise comes from `sort(unique(data$.cut))`.
+`factor()` levels are `sort(unique(x))` under the current collation, and level
+order decides how grouped results are ordered. Row order of
+`testTubePrecision` and `testTubeAccuracy` output comes from
+`sort(unique(data$.cut))`.
 
-The port reproduces **R under `LC_COLLATE=C`**. A user running R under a
-UK/US locale, where collation largely ignores punctuation at the primary
-strength, can legitimately get different `.sample_id` numbering than this port
-produces. Supporting full ICU collation is possible but would add a heavy
+The port reproduces **R under `LC_COLLATE=C`**, which is pinned in the fixture
+generator. A user running R under a UK/US locale — where collation largely
+ignores punctuation at the primary strength — can legitimately get a different
+ordering. Supporting full ICU collation is possible but would add a heavy
 dependency; raise an issue if you need it.
+
+(`.sample_id` no longer depends on this: it is built from a tuple, not a
+collated string.)
 
 ### R `Date` is a double, and `.date` rounds half-to-even
 
@@ -152,31 +158,23 @@ The parity serialiser writes a Date's underlying numeric rather than
 `%Y-%m-%d`, so that any fractional component would show up as a difference
 instead of being flattened away by formatting.
 
-### R's `mean` is a two-pass algorithm
+### R's floating-point arithmetic — found, then deliberately dropped
 
-`mean(x)` is not `sum(x)/n`. R computes that, then corrects it:
-`s = sum(x)/n; if finite: s += sum(x - s)/n`. Skipping the correction changes
-the last bit of nearly every group mean. numpy's `sum` also uses pairwise
-summation where R uses a sequential loop, so `cumsum` is used to force
-sequential accumulation.
+Under the old bit-exact bar two behaviours had to be reproduced, and both are
+worth recording even though the code is gone:
 
-### R's compiler contracts multiply-adds into FMAs
+- **`mean` is two-pass.** R computes `sum(x)/n`, then corrects it with
+  `s += sum(x - s)/n`. Skipping the correction changes the last bit of nearly
+  every group mean.
+- **R's compiler contracts multiply-adds into FMAs.** Its variance loop is
+  `sum += (x[k] - xm) * (x[k] - xm)`, fused under the default
+  `-ffp-contract=on`. Reproducing that matched **2875/2875** real replicate
+  groups where plain sequential accumulation matched 2262.
 
-This one is only discoverable by measurement. R's variance loop is
-`sum += (x[k] - xm) * (x[k] - xm)`, and the C compiler fuses it into a single
-multiply-add under the default `-ffp-contract=on`. An FMA rounds once where a
-separate multiply and add round twice.
-
-Measured over the 2,875 co-located replicate groups in `dt.brd` — the domain
-`testTubePrecision` actually operates on:
-
-| accumulation | matches R |
-|---|---|
-| FMA (what we do) | **2875 / 2875** |
-| plain sequential | 2262 / 2875 |
-
-The same contraction appears in `qnorm`'s Horner evaluation and in
-`r = .180625 - q*q`; reproducing it there took qnorm from 5 mismatches to 0.
+Both are now handled by numpy, agreeing with R to ~1e-16 — seven orders inside
+the 1e-6 bound. The ~520 lines that chased them (including hand-ported `qnorm`
+and `qt`) were removed, along with their dependence on `long double` being
+64-bit.
 
 ## Known gaps
 

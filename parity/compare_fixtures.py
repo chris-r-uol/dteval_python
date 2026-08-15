@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -36,13 +37,52 @@ from compare import DEFAULT_TOL, Report, compare_series  # noqa: E402
 
 from dteval.rcompat.rserial import load_column  # noqa: E402
 
+MANIFEST = Path(__file__).parent / "manifest.yaml"
+
+
+def fixture_name(case_id: str) -> str:
+    """The filename generate.R writes a case to."""
+    return f"{case_id.replace('/', '__')}.json.gz"
+
+
+def load_cases() -> dict[str, dict]:
+    """Manifest cases keyed by fixture filename.
+
+    The fixture gate has to honour the same per-case settings the Python-vs-R
+    suite does. A case marked `gating: false` is documented as not held to the
+    contract -- deseason and cluster, where R's own answer is an approximation
+    -- so holding its *fixture* to the contract instead would be incoherent.
+    """
+    import yaml
+
+    manifest = yaml.safe_load(MANIFEST.read_text())
+    return {fixture_name(case["id"]): case for case in manifest["cases"]}
+
+
+def tolerance_for(node: dict, case: dict | None, default: float) -> float:
+    """The tolerance for one column, honouring the case's tol / tol_columns."""
+    if case is None:
+        return default
+    tol = case.get("tol", default)
+    columns = case.get("tol_columns")
+    name = node.get("name")
+    if columns and name:
+        if isinstance(columns, dict):
+            return columns.get(name, tol)
+        if name in columns:
+            return tol
+    return tol
+
+
 #: Provenance, not fixtures: R package versions and which shims were needed
 #: legitimately differ between machines. _lock.json's upstream SHA and source
 #: hash are the parts that must hold, and tests/test_lock.py gates those.
 PROVENANCE = {"_lock.json", "_shims.json"}
 
 
-def compare_nodes(exp: Any, got: Any, path: str, rep: Report, tol: float) -> None:
+def compare_nodes(
+    exp: Any, got: Any, path: str, rep: Report, tol: float, case: dict | None = None
+) -> None:
     """Walk two serialised trees in parallel.
 
     The serialiser emits a small closed set of node shapes, so one recursive
@@ -53,7 +93,7 @@ def compare_nodes(exp: Any, got: Any, path: str, rep: Report, tol: float) -> Non
     """
     if isinstance(exp, dict) and isinstance(got, dict):
         if "rtype" in exp and "rtype" in got:
-            compare_vectors(exp, got, path, rep, tol)
+            compare_vectors(exp, got, path, rep, tolerance_for(exp, case, tol))
             return
         if exp.keys() != got.keys():
             only_exp = sorted(exp.keys() - got.keys())
@@ -61,7 +101,7 @@ def compare_nodes(exp: Any, got: Any, path: str, rep: Report, tol: float) -> Non
             rep.add(path, f"keys differ: missing {only_exp}, unexpected {only_got}")
             return
         for key in exp:
-            compare_nodes(exp[key], got[key], f"{path}.{key}", rep, tol)
+            compare_nodes(exp[key], got[key], f"{path}.{key}", rep, tol, case)
         return
 
     if isinstance(exp, list) and isinstance(got, list):
@@ -69,11 +109,41 @@ def compare_nodes(exp: Any, got: Any, path: str, rep: Report, tol: float) -> Non
             rep.add(path, f"length {len(got)}, expected {len(exp)}")
             return
         for i, (a, b) in enumerate(zip(exp, got, strict=True)):
-            compare_nodes(a, b, f"{path}[{i}]", rep, tol)
+            compare_nodes(a, b, f"{path}[{i}]", rep, tol, case)
         return
+
+    if isinstance(exp, str) and isinstance(got, str):
+        verdict = numeric_strings_agree(exp, got, tol)
+        if verdict is not None:
+            if not verdict:
+                rep.add(path, f"expected {exp!r}, got {got!r}")
+            return
 
     if exp != got:
         rep.add(path, f"expected {exp!r}, got {got!r}")
+
+
+def numeric_strings_agree(exp: str, got: str, tol: float) -> bool | None:
+    """Compare two bare strings as serialised doubles, or return None.
+
+    Some blocks in _rcompat.json.gz are plain %.17g character vectors rather
+    than serialised columns, so they arrive as JSON strings and would otherwise
+    be compared as text -- which fails on the last-ulp differences this gate
+    exists to tolerate.
+
+    Only bare strings reach here. Anything that is *data* arrives inside an
+    `rtype: character` node and is compared exactly by compare_vectors, so
+    widening these cannot loosen a real string comparison.
+    """
+    if exp in SPECIAL_TOKENS or got in SPECIAL_TOKENS:
+        return exp == got
+    try:
+        a, b = float(exp), float(got)
+    except ValueError:
+        return None
+    if math.isnan(a) or math.isnan(b) or math.isinf(a) or math.isinf(b):
+        return exp == got
+    return math.isclose(a, b, rel_tol=tol, abs_tol=0.0)
 
 
 #: Tokens the serialiser writes instead of a number. They must be compared as
@@ -116,8 +186,12 @@ def compare_vectors(exp: dict, got: dict, path: str, rep: Report, tol: float) ->
     compare_series(load_column(exp), load_column(got), path, rep, tol)
 
 
-def compare_directories(committed: Path, regenerated: Path, tol: float) -> list[Report]:
-    reports = []
+def compare_directories(
+    committed: Path, regenerated: Path, tol: float, cases: dict[str, dict] | None = None
+) -> tuple[list[Report], list[str]]:
+    cases = {} if cases is None else cases
+    reports: list[Report] = []
+    skipped: list[str] = []
     expected_files = {p.name for p in committed.glob("*.json.gz")} - PROVENANCE
     actual_files = {p.name for p in regenerated.glob("*.json.gz")} - PROVENANCE
 
@@ -131,15 +205,19 @@ def compare_directories(committed: Path, regenerated: Path, tol: float) -> list[
         reports.append(rep)
 
     for name in sorted(expected_files & actual_files):
+        case = cases.get(name)
+        if case is not None and case.get("gating", True) is False:
+            skipped.append(name)
+            continue
         rep = Report(name)
         with gzip.open(committed / name, "rt") as fh:
             exp = json.load(fh)
         with gzip.open(regenerated / name, "rt") as fh:
             got = json.load(fh)
-        compare_nodes(exp, got, "$", rep, tol)
+        compare_nodes(exp, got, "$", rep, tol, case)
         if not rep.ok:
             reports.append(rep)
-    return reports
+    return reports, skipped
 
 
 def main(argv: list[str]) -> int:
@@ -147,7 +225,11 @@ def main(argv: list[str]) -> int:
         print(__doc__)
         return 2
     committed, regenerated = Path(argv[1]), Path(argv[2])
-    reports = compare_directories(committed, regenerated, DEFAULT_TOL)
+    reports, skipped = compare_directories(
+        committed, regenerated, DEFAULT_TOL, load_cases()
+    )
+    for name in skipped:
+        print(f"skipped (gating: false in the manifest): {name}")
 
     if not reports:
         print(

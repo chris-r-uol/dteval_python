@@ -107,13 +107,34 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /usr/local/lib/R/site-library
-          key: r-${{ runner.os }}-4.6.1-${{ hashFiles('parity/generate.R', 'tools/build_r_shims.R') }}
+          key: r-${{ runner.os }}-4.6.1-${{ hashFiles('.github/workflows/ci.yml', 'tools/build_r_shims.R') }}
 
       - name: R packages
+        # Note there is no `repos=` here, deliberately. rocker/r-ver defaults to
+        # the Posit Package Manager binary repo for this Ubuntu release;
+        # pointing at cloud.r-project.org instead gets source tarballs and
+        # rebuilds the whole tree, which is both slow and fragile (fs wants
+        # libuv, sf wants the full GDAL toolchain) for no benefit.
+        #
+        # The list is DTEval's own Imports, because R CMD INSTALL checks every
+        # one of them when generate.R installs the pinned tree. AQEval and
+        # OpenStreetMap are the exceptions -- tools/build_r_shims.R supplies
+        # those in the next step but one.
         run: |
-          Rscript -e 'p <- c("jsonlite","yaml","data.table","ggplot2","sf","mgcv","cluster","leaflet");
-                      m <- p[!p %in% rownames(installed.packages())];
-                      if (length(m)) install.packages(m, repos="https://cloud.r-project.org")'
+          Rscript -e '
+            p <- c("jsonlite", "yaml",
+                   "data.table", "ggplot2", "ggtext", "leaflet", "metR",
+                   "mgcv", "cluster", "sf", "raster")
+            m <- p[!p %in% rownames(installed.packages())]
+            if (length(m)) install.packages(m)
+            # install.packages only warns when a package fails to build, so
+            # check rather than trust -- otherwise the failure surfaces much
+            # later as an unrelated R CMD INSTALL error.
+            missing <- p[!p %in% rownames(installed.packages())]
+            if (length(missing)) {
+              stop("failed to install: ", paste(missing, collapse = ", "), call. = FALSE)
+            }
+          '
 
       - name: Python environment
         run: |

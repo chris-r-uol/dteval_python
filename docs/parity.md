@@ -380,6 +380,14 @@ That is the single highest-value remaining piece of numerical work.
 
 ### `deseason_tube_data` — R's LOESS surface, not ours
 
+> Regenerating the fixtures on Linux put a number on how unstable R's own
+> approximation is: `..season` moves by up to **8e-6 relative** between R on
+> macOS arm64 and R on Linux x86_64 — above the 1e-6 parity tolerance, from the
+> same R source on the same data. R's kd-tree surface is not merely an
+> approximation of the exact fit, it is not reproducible across platforms
+> either. Everything else in that fixture agrees to 1e-6.
+
+
 Structure matches exactly. The fitted components (`..fit`, `..trend`,
 `..season`, `..deseason`) do not, and this is the one place the port
 deliberately computes something different from R's default.

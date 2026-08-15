@@ -14,7 +14,12 @@ from pathlib import Path
 
 import pytest
 from parity.compare import DEFAULT_TOL, Report
-from parity.compare_fixtures import compare_directories, compare_nodes
+from parity.compare_fixtures import (
+    compare_directories,
+    compare_nodes,
+    load_cases,
+    numeric_strings_agree,
+)
 
 FIXTURES = Path(__file__).resolve().parents[1] / "parity" / "fixtures"
 CASE = "calc__calcTubeStat.by.year.json.gz"
@@ -79,7 +84,8 @@ def test_na_and_nan_stay_distinct():
 def test_a_directory_compared_with_itself_agrees():
     if not (FIXTURES / CASE).exists():
         pytest.skip("run Rscript parity/generate.R")
-    assert compare_directories(FIXTURES, FIXTURES, DEFAULT_TOL) == []
+    reports, _ = compare_directories(FIXTURES, FIXTURES, DEFAULT_TOL, load_cases())
+    assert reports == []
 
 
 def test_a_missing_fixture_is_reported(tmp_path):
@@ -90,7 +96,7 @@ def test_a_missing_fixture_is_reported(tmp_path):
     with gzip.open(partial / "only_one.json.gz", "wt") as fh:
         json.dump({"value": _numeric_node(["1"])}, fh)
 
-    reports = compare_directories(FIXTURES, partial, DEFAULT_TOL)
+    reports, _ = compare_directories(FIXTURES, partial, DEFAULT_TOL)
     messages = " ".join(str(d) for rep in reports for d in rep.diffs)
     assert "was not regenerated" in messages
     assert "new and not committed" in messages
@@ -107,4 +113,25 @@ def test_provenance_files_are_not_compared(tmp_path):
     with gzip.open(b / "_lock.json", "wt") as fh:
         json.dump({"packages": {"sf": "9.9.9"}}, fh)
 
-    assert compare_directories(a, b, DEFAULT_TOL) == []
+    assert compare_directories(a, b, DEFAULT_TOL) == ([], [])
+
+
+def test_bare_numeric_strings_use_the_tolerance():
+    """Some _rcompat blocks are plain %.17g character vectors, so they arrive
+    as JSON strings and must still tolerate a last-ulp difference."""
+    assert numeric_strings_agree("23.498466666666662", "23.498466666666666", DEFAULT_TOL)
+    assert not numeric_strings_agree("23.4984", "23.5", DEFAULT_TOL)
+
+
+def test_bare_non_numeric_strings_stay_exact():
+    assert numeric_strings_agree("Bradford", "Bradford", DEFAULT_TOL) is None
+    assert numeric_strings_agree("NA", "NaN", DEFAULT_TOL) is False
+    assert numeric_strings_agree("NA", "NA", DEFAULT_TOL) is True
+
+
+def test_non_gating_cases_are_skipped_not_compared():
+    """deseason and cluster are documented approximations of R's own
+    approximation; the fixture gate must agree with the manifest about that."""
+    cases = load_cases()
+    non_gating = [n for n, c in cases.items() if c.get("gating", True) is False]
+    assert "deseason__method1.location.json.gz" in non_gating

@@ -75,11 +75,20 @@ jobs:
   # what is committed. This is what stops the reference values going stale.
   parity-live:
     name: parity vs live R
+    # Not on push-to-main: the job builds an R container and regenerates every
+    # fixture, and main is already covered by `test` on every push and by this
+    # job on the PR that introduced the change.
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     container:
       image: rocker/r-ver:4.6.1
     steps:
       - uses: actions/checkout@v4
+
+      - name: Trust the workspace
+        # The job runs in a container as root over a mounted workspace, which
+        # trips git's dubious-ownership check; `git diff` below needs it.
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: System dependencies
         run: |
@@ -121,17 +130,47 @@ jobs:
           Rscript parity/generate_rcompat.R
           Rscript parity/generate.R
 
-      - name: Fixtures must be unchanged
-        # If this fails, either R changed or the committed fixtures are stale.
-        # Both need a human; neither should pass silently.
+      - name: Provenance differences (informational)
+        # _lock.json and _shims.json record the machine that generated the
+        # fixtures -- R package versions, which shims were needed. Those
+        # legitimately differ between a maintainer's laptop and this container,
+        # so they are reported rather than gated. What they must NOT do is
+        # change the upstream SHA or source hash, and tests/test_lock.py gates
+        # that on every run.
+        if: always()
         run: |
-          if ! git diff --exit-code --stat parity/fixtures/; then
+          git diff --stat -- parity/fixtures/_lock.json parity/fixtures/_shims.json || true
+
+      - name: Fixtures must be unchanged
+        # If this fails, either the committed fixtures are stale or live R now
+        # produces different values. Both need a human; neither should pass
+        # silently.
+        #
+        # Note this asserts BYTE identity of the regenerated fixtures, which
+        # also requires this container to agree with the generating machine on
+        # floating-point accumulation -- R sums in long double where the build
+        # has it, and the fixtures carry 17 significant digits. If that is what
+        # fails here, the diff below will show last-digit-only changes, and the
+        # gate should move to the comparator's tolerance rather than bytes.
+        run: |
+          changed=$(git diff --name-only -- parity/fixtures/ \
+                    | grep -v '_lock.json\|_shims.json' || true)
+          if [ -n "$changed" ]; then
             echo "::error::Regenerated fixtures differ from those committed."
-            echo "Run 'make fixtures' locally and commit the result, or"
-            echo "investigate why live R now produces different values."
-            git diff --stat parity/fixtures/
+            echo "$changed"
+            echo "--- first differing fixture, decoded ---"
+            first=$(echo "$changed" | head -1)
+            git show "HEAD:$first" > /tmp/old.json.gz
+            .venv/bin/python - "$first" <<'PY'
+          import gzip, json, sys
+          new = json.load(gzip.open(sys.argv[1]))
+          old = json.load(gzip.open("/tmp/old.json.gz"))
+          print("committed :", json.dumps(old)[:600])
+          print("regenerated:", json.dumps(new)[:600])
+          PY
             exit 1
           fi
+          echo "all fixtures byte-identical to those committed"
 
       - name: Parity suite against the freshly generated fixtures
         run: .venv/bin/python -m pytest -q -m parity

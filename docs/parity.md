@@ -13,7 +13,7 @@ gap.
 | Serialisation | `parity/serialize.R` — `%.17g` doubles (lossless), explicit R classes, factor levels, NA-vs-NaN |
 | Python side | `tests/test_parity.py` evaluates the Python expression and compares |
 | Comparison | `parity/compare.py` — floats to 1e-6, structure exact; any override requires a documented `reason` |
-| Staleness | `parity/fixtures/_lock.json` records the upstream SHA and R-source hash; CI regenerates and fails on drift |
+| Staleness | `parity/fixtures/_lock.json` records the upstream SHA and R-source hash; `tests/test_lock.py` gates both, and CI regenerates from live R on every PR |
 
 **Numbers are compared to a relative tolerance of 1e-6; structure is compared
 exactly.**

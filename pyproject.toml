@@ -15,29 +15,30 @@ classifiers = [
   "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
   "Topic :: Scientific/Engineering :: Atmospheric Science",
 ]
+# Deliberately small: this is intended to run in a web backend, so everything
+# that is not needed to compute a result is optional. No compiled extension
+# beyond numpy/scipy/pandas themselves.
 dependencies = [
   "numpy>=1.26",
   "pandas>=2.1",
   "scipy>=1.11",
-  "scikit-misc>=0.3",
-  "shapely>=2.0",
-  "pyproj>=3.6",
-  # The user's own AQEval port. DTEval needs find_near_lat_lon and
-  # calc_date_range_stat; reimplementing them here would duplicate a maintained
-  # package. Requires the haversine R-parity fix (>= the fix/haversine-r-parity
-  # branch) -- see docs/parity.md.
-  "aqeval>=0.7.1",
 ]
 
 [project.optional-dependencies]
-plots = ["plotnine>=0.13", "matplotlib>=3.8"]
-maps = ["folium>=0.15", "contextily>=1.5"]
+# Point-in-polygon for tube_in_xy_polygon.
+geo = ["shapely>=2.0"]
+# find_near_lat_lon / calc_date_range_stat, used by tube_summary_lat_lon and
+# deseason_tube_data(method=2). See docs/parity.md on the haversine fix.
+aqeval = ["aqeval>=0.7.1"]
+# Server-side figure rendering. Not needed if the frontend draws from
+# TubePlot.to_spec(); see docs/backend.md.
+plots = ["plotnine>=0.13"]
 dev = [
   "pytest>=8.0",
   "pyyaml>=6.0",
   "ruff>=0.6",
 ]
-all = ["dteval[plots,maps,dev]"]
+all = ["dteval[geo,aqeval,plots]"]
 
 [project.urls]
 Homepage = "https://github.com/karlropkins/DTEval"

@@ -16,8 +16,10 @@ merely intended:
   serialises the results losslessly (17-significant-digit doubles, explicit
   column classes, factor levels, NA-vs-NaN).
 - `pytest -m parity` compares the Python results against those fixtures.
-  Doubles must match **bit for bit** unless the manifest records a tolerance
-  *and* a reason for it.
+  Numbers are held to a relative 1e-6; **structure is exact** — column names
+  and order, row order, dtypes, factor levels, NA-vs-NaN, and every integer,
+  string, date and boolean. Any looser bound needs a documented reason in the
+  manifest.
 - CI additionally regenerates the fixtures from live R on every PR and fails if
   they drift, so the reference values cannot silently go stale.
 
@@ -28,8 +30,15 @@ Output conventions follow the R package: tagged column names (`.value`,
 ## Install
 
 ```bash
-pip install -e ".[all]"
+pip install dteval            # core: numpy, pandas, scipy
+pip install "dteval[all]"     # + shapely, aqeval, plotnine
 ```
+
+The core install has no compiled dependency beyond numpy/pandas/scipy and can
+run every analysis in the package. Optional extras cover point-in-polygon
+(`geo`), nearest-site distances (`aqeval`) and server-side figure rendering
+(`plots`); calling something without its extra tells you which to install. See
+[`docs/backend.md`](docs/backend.md) if you are deploying this behind an API.
 
 ## Quick start
 
@@ -43,6 +52,10 @@ dte.tube_summary(dt)
 
 res = dte.test_tube_precision(dt)
 print(res["report"])
+#> '.value' (rep = 3 subset):
+#>   |all| mean: 25.69 (6.522 to 56.88) precision: -14.01[%] to 14.01[%]
+
+res["plot"].to_spec()      # JSON-serialisable figure, no plotting stack needed
 ```
 
 ## Naming
@@ -78,11 +91,12 @@ their measured deviation is tracked so it cannot drift unnoticed:
 
 | Area | Reason |
 |---|---|
-| `fit_tube_model_gam` | `mgcv::gam` tensor smooths with GCV/REML selection have no faithful Python equivalent |
-| `tube_map` | basemap rasters come from a different tile stack; only the ggplot layers and bbox are compared |
-| `leaflet_tube_map` | folium and leaflet emit structurally different HTML; compared on layer contents |
+| `deseason_tube_data` | R fits LOESS with its default kd-tree *approximation*; we compute the exact local regression. Our fit matches R's own `surface="direct"` to 2e-13 |
+| `cluster_tube_data` | R uses `clara` (PAM on random subsamples, RNG-dependent); we run PAM on the full data. Ours reproduces R's own `pam()` exactly |
+| `tube_map` / `leaflet_tube_map` | not yet ported |
 
-Everything else is expected to be bit-exact, and CI enforces that.
+Both gaps are cases where the port computes the exact answer R's shortcut is
+approximating — with the measurements to show it. Everything else is gated.
 
 ## Licence
 

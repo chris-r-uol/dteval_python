@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from dteval._loess_direct import loess_direct
-from dteval.loess import MultivariateLoessUnavailable, r_loess
+from dteval.loess import r_loess
 
 
 def test_univariate_recovers_a_noiseless_signal():
@@ -21,13 +21,13 @@ def test_univariate_recovers_a_noiseless_signal():
     assert np.max(np.abs(fit.predict() - y)) < 1e-9
 
 
-def test_multivariate_interpolate_is_refused_not_guessed():
-    """scikit-misc's multivariate fit is wrong; we must not return it."""
+def test_multivariate_is_supported():
+    """The case scikit-misc got wrong: a second predictor that matters."""
     rng = np.random.default_rng(0)
     x = np.column_stack([rng.uniform(0, 100, 60), rng.uniform(0, 50, 60)])
     y = x[:, 0] + x[:, 1]
-    with pytest.raises(MultivariateLoessUnavailable, match="ehg128|not reproduce R"):
-        r_loess(x, y)  # default surface="interpolate"
+    got = r_loess(x, y).predict()
+    assert np.max(np.abs(got - y)) < 1e-6
 
 
 def test_multivariate_direct_recovers_a_noiseless_plane():

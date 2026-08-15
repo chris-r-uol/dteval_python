@@ -1,0 +1,136 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast path: no R. Compares against the committed fixtures, which is what
+  # every contributor runs locally too.
+  test:
+    name: test (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          # geo+aqeval so the optional code paths are exercised; plots is left
+          # out on purpose, so an accidental hard dependency on plotnine fails
+          # here rather than in someone's container.
+          python -m pip install -e ".[geo,aqeval,dev]"
+
+      - name: Lint
+        run: python -m ruff check src tests parity tools
+
+      - name: Test
+        run: python -m pytest -q
+
+  # The core package must work with nothing optional installed -- that is what
+  # a slim backend image will actually have.
+  minimal-install:
+    name: minimal install (no extras)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip && python -m pip install -e .
+      - name: Import and run an analysis without any extra
+        run: |
+          python - <<'PY'
+          import dteval as dte
+          d = dte.datasets.dt_brd()
+          assert len(dte.tag_tube(d)) == 11273
+          assert len(dte.calc_tube_stat(d, by="year_of_measurement")) == 4
+          res = dte.test_tube_precision(d, show=[])
+          assert set(res) == {"data", "plot", "lookup", "report"}
+          import json; json.dumps(res["plot"].to_spec())   # serialises with no extras
+          assert dte.deseason_tube_data(d, ".value", by=".location").shape[0] == 5868
+          assert dte.cluster_tube_data(d, tube=".value", by=".location",
+                                       clusters=2, method=2).shape[0] == 11273
+          print(res["report"])
+          print("core package OK without geo/aqeval/plots")
+          PY
+
+  # Slow path: regenerate the fixtures from live R and prove they still match
+  # what is committed. This is what stops the reference values going stale.
+  parity-live:
+    name: parity vs live R
+    runs-on: ubuntu-latest
+    container:
+      image: rocker/r-ver:4.6.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System dependencies
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            python3 python3-pip python3-venv git \
+            libcurl4-openssl-dev libssl-dev libxml2-dev \
+            libudunits2-dev libgdal-dev libgeos-dev libproj-dev
+
+      - name: Cache the R library
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/lib/R/site-library
+          key: r-${{ runner.os }}-4.6.1-${{ hashFiles('parity/generate.R', 'tools/build_r_shims.R') }}
+
+      - name: R packages
+        run: |
+          Rscript -e 'p <- c("jsonlite","yaml","data.table","ggplot2","sf","mgcv","cluster");
+                      m <- p[!p %in% rownames(installed.packages())];
+                      if (length(m)) install.packages(m, repos="https://cloud.r-project.org")'
+
+      - name: Python environment
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -e ".[geo,aqeval,dev]"
+
+      - name: Pinned upstream DTEval
+        run: make r-reference
+
+      - name: Build the loa/AQEval shims
+        # See tools/build_r_shims.R: the real AQEval needs rJava and hence a
+        # JDK, which none of its two functions actually use.
+        run: make r-shims
+
+      - name: Regenerate every fixture from live R
+        run: |
+          Rscript parity/generate_rcompat.R
+          Rscript parity/generate.R
+
+      - name: Fixtures must be unchanged
+        # If this fails, either R changed or the committed fixtures are stale.
+        # Both need a human; neither should pass silently.
+        run: |
+          if ! git diff --exit-code --stat parity/fixtures/; then
+            echo "::error::Regenerated fixtures differ from those committed."
+            echo "Run 'make fixtures' locally and commit the result, or"
+            echo "investigate why live R now produces different values."
+            git diff --stat parity/fixtures/
+            exit 1
+          fi
+
+      - name: Parity suite against the freshly generated fixtures
+        run: .venv/bin/python -m pytest -q -m parity

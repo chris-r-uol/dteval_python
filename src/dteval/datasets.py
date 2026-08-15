@@ -69,7 +69,13 @@ def caz_brd():
     ``sf`` object plays in R: a polygon source for :func:`dteval.tube_in_xy_polygon`.
     Coordinates are WGS84 (EPSG:4326), matching the R object after transform.
     """
-    from shapely.geometry import shape
+    try:
+        from shapely.geometry import shape
+    except ImportError as exc:  # pragma: no cover - depends on the install
+        raise ImportError(
+            "caz_brd() returns a geometry and needs shapely. Install it with: "
+            "pip install 'dteval[geo]'"
+        ) from exc
 
     gj = _load_caz()
     feats = gj.get("features", [])

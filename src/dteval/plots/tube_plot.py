@@ -55,13 +55,52 @@ class TubePlot:
     theme: str = "theme_bw"
 
     def parity_spec(self) -> dict[str, Any]:
-        """The structure the parity comparator checks against the R fixture."""
+        """Internal form used by the parity comparator (data stays a DataFrame)."""
         return {
             "labels": dict(self.labels),
             "facet": self.facet,
             "facet_vars": list(self.facet_vars),
             "layers": [layer.to_spec() for layer in self.layers],
         }
+
+    def to_spec(self, orient: str = "columns") -> dict[str, Any]:
+        """A JSON-serialisable description of the figure.
+
+        Everything a client needs to draw the plot itself: per layer the geom,
+        the data, which columns map to which aesthetics, and any constant
+        aesthetics; plus the axis labels, facet variables and palette.
+
+        This is the intended output for a web frontend -- the backend need not
+        render anything, and ``dteval[plots]`` need not be installed. ``orient``
+        is ``"columns"`` (default, compact) or ``"records"`` (row objects).
+
+        NaN becomes ``None``, timestamps become ISO-8601 strings and categories
+        become their labels, so the result survives ``json.dumps`` unchanged.
+        """
+        return {
+            "labels": {k: v for k, v in self.labels.items() if v is not None},
+            "facet": {"type": self.facet_type, "vars": list(self.facet_vars)}
+            if self.facet_vars
+            else None,
+            "palette": list(self.palette) if self.palette else None,
+            "fill_palette": list(self.fill_palette) if self.fill_palette else None,
+            "theme": self.theme,
+            "layers": [
+                {
+                    "geom": layer.geom,
+                    "mapping": dict(layer.mapping),
+                    "params": {k: _jsonable(v) for k, v in layer.params.items()},
+                    "data": _frame_to_json(layer.data, orient),
+                }
+                for layer in self.layers
+            ],
+        }
+
+    def to_json(self, orient: str = "columns", **kwargs) -> str:
+        """:meth:`to_spec` serialised with ``json.dumps``."""
+        import json
+
+        return json.dumps(self.to_spec(orient=orient), **kwargs)
 
     # -- rendering ---------------------------------------------------------
     def draw(self):
@@ -153,6 +192,49 @@ def tube_plot(
         "subtitle": quick_text(xargs.get("title"), auto),
     }
     return plot
+
+
+def _jsonable(value: Any) -> Any:
+    """Coerce a value into something ``json.dumps`` accepts."""
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        return None if value != value else value
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    return str(value)
+
+
+def _frame_to_json(frame: pd.DataFrame, orient: str) -> Any:
+    """Serialise a layer's data, preserving types a frontend can use.
+
+    Timestamps become ISO-8601 strings, categoricals their labels, and every
+    flavour of missing value becomes ``null`` -- pandas alone would emit ``NaN``
+    or ``NaT``, which are not valid JSON.
+    """
+    out: dict[str, list[Any]] = {}
+    for name in frame.columns:
+        series = frame[name]
+        if pd.api.types.is_datetime64_any_dtype(series):
+            values = [None if pd.isna(v) else v.isoformat() for v in series]
+        elif isinstance(series.dtype, pd.CategoricalDtype):
+            values = [None if pd.isna(v) else str(v) for v in series]
+        elif pd.api.types.is_bool_dtype(series.dtype):
+            values = [None if pd.isna(v) else bool(v) for v in series]
+        elif pd.api.types.is_integer_dtype(series.dtype):
+            values = [None if pd.isna(v) else int(v) for v in series]
+        elif pd.api.types.is_float_dtype(series.dtype):
+            values = [None if pd.isna(v) else float(v) for v in series]
+        else:
+            values = [None if pd.isna(v) else str(v) for v in series]
+        out[str(name)] = values
+
+    if orient == "columns":
+        return {"columns": list(out), "nrow": len(frame), "data": out}
+    if orient == "records":
+        names = list(out)
+        return [dict(zip(names, row, strict=True)) for row in zip(*out.values(), strict=True)]
+    raise ValueError(f"orient must be 'columns' or 'records', got {orient!r}")
 
 
 def _resolve_plot_types(plot_type, xargs: dict[str, Any]) -> list[str]:
@@ -470,7 +552,14 @@ _AES_RENAME = {"colour": "color"}
 
 
 def _to_plotnine(plot: TubePlot):
-    import plotnine as p9
+    try:
+        import plotnine as p9
+    except ImportError as exc:  # pragma: no cover - depends on the install
+        raise ImportError(
+            "Rendering needs plotnine. Install it with: pip install "
+            "'dteval[plots]' -- or use TubePlot.to_spec() and draw client-side "
+            "(see docs/backend.md)."
+        ) from exc
 
     # tubePlot's base is theme_bw() with transparent facet strips
     # (tube.plots.R:471) -- hence white strip headers rather than grey ones.

@@ -80,7 +80,13 @@ def deseason_tube_data(
         + as_character_series(summary[".longitude"]).fillna("NA")
     )
 
-    from aqeval import find_near_lat_lon
+    try:
+        from aqeval import find_near_lat_lon
+    except ImportError as exc:  # pragma: no cover - depends on the install
+        raise ImportError(
+            "deseason_tube_data(method=2) needs the aqeval package. Install it "
+            "with: pip install 'dteval[aqeval]'"
+        ) from exc
 
     chunks = []
     for site in sorted(pd.unique(summary["..id"])):
@@ -159,16 +165,16 @@ def _fit_one(chunk: pd.DataFrame, **kwargs) -> pd.DataFrame | None:
         return None
 
     fit, fit_se = model.predict(out[["jd", "n"]], se=True)
-    out["..fit"] = model.scatter(fit[: len(model.used_index)], len(out))
-    out["..fit.se"] = model.scatter(fit_se[: len(model.used_index)], len(out))
+    out["..fit"] = model.scatter(fit, len(out))
+    out["..fit.se"] = model.scatter(fit_se, len(out))
 
     # The trend is the same surface evaluated at the mean day-of-year, i.e.
     # with the seasonal coordinate held fixed.
     flat = out[["jd", "n"]].copy()
     flat["jd"] = out["jd"].mean()
     trend, trend_se = model.predict(flat, se=True)
-    out["..trend"] = model.scatter(trend[: len(model.used_index)], len(out))
-    out["..trend.se"] = model.scatter(trend_se[: len(model.used_index)], len(out))
+    out["..trend"] = model.scatter(trend, len(out))
+    out["..trend.se"] = model.scatter(trend_se, len(out))
 
     # Re-centre the trend onto the fit's level. Note R uses mean() without
     # na.rm here (deseason.tube.R:297, flagged in its own comment), so a single

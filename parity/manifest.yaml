@@ -185,6 +185,25 @@ cases:
   - id: precision/default
     r: testTubePrecision(dt.brd, show = character(0))
     py: dte.test_tube_precision(dte.datasets.dt_brd(), show=[])
+    tol_columns:
+      ".ylow": 1.0e-2
+      ".yhigh": 1.0e-2
+      "low": 1.0e-2
+      "high": 1.0e-2
+      "low.pc": 1.0e-1
+      "high.pc": 1.0e-1
+    reason: >-
+      The LOESS confidence bounds only. R fits with surface="interpolate", a
+      kd-tree approximation; we compute the exact local regression (see
+      dteval.loess). For the central fit (.y) the two agree to 6e-12, because
+      the 7,527-point neighbourhood gives R's kd-tree plenty to work with. The
+      bounds are fitted to .low/.high, which are step-like in .mean, so R's
+      interpolation error shows more: worst 1.7e-3 relative, which is
+      **0.072 ug/m3** -- about 3% of the ~2.4 ug/m3 (10%) measurement error on
+      a diffusion tube. The .pc columns divide that by ans, reaching 1.4e-2
+      relative or 0.14 percentage points. Bounds set with headroom over the
+      observed values; everything else in these cases, including .n, .mean,
+      .sd, .low, .high and the report string, is held to the 1e-6 default.
     label_columns: [".sample_id"]
     label_reason: >-
       .sample_id numbers replicate sets. R derives its integers by pasting the
@@ -199,6 +218,25 @@ cases:
   - id: precision/method1
     r: testTubePrecision(dt.brd, method = 1, show = character(0))
     py: dte.test_tube_precision(dte.datasets.dt_brd(), method=1, show=[])
+    tol_columns:
+      ".ylow": 1.0e-2
+      ".yhigh": 1.0e-2
+      "low": 1.0e-2
+      "high": 1.0e-2
+      "low.pc": 1.0e-1
+      "high.pc": 1.0e-1
+    reason: >-
+      The LOESS confidence bounds only. R fits with surface="interpolate", a
+      kd-tree approximation; we compute the exact local regression (see
+      dteval.loess). For the central fit (.y) the two agree to 6e-12, because
+      the 7,527-point neighbourhood gives R's kd-tree plenty to work with. The
+      bounds are fitted to .low/.high, which are step-like in .mean, so R's
+      interpolation error shows more: worst 1.7e-3 relative, which is
+      **0.072 ug/m3** -- about 3% of the ~2.4 ug/m3 (10%) measurement error on
+      a diffusion tube. The .pc columns divide that by ans, reaching 1.4e-2
+      relative or 0.14 percentage points. Bounds set with headroom over the
+      observed values; everything else in these cases, including .n, .mean,
+      .sd, .low, .high and the report string, is held to the 1e-6 default.
     label_columns: [".sample_id"]
     label_reason: >-
       .sample_id numbers replicate sets. R derives its integers by pasting the
@@ -213,6 +251,25 @@ cases:
   - id: precision/method3
     r: testTubePrecision(dt.brd, method = 3, show = character(0))
     py: dte.test_tube_precision(dte.datasets.dt_brd(), method=3, show=[])
+    tol_columns:
+      ".ylow": 1.0e-2
+      ".yhigh": 1.0e-2
+      "low": 1.0e-2
+      "high": 1.0e-2
+      "low.pc": 1.0e-1
+      "high.pc": 1.0e-1
+    reason: >-
+      The LOESS confidence bounds only. R fits with surface="interpolate", a
+      kd-tree approximation; we compute the exact local regression (see
+      dteval.loess). For the central fit (.y) the two agree to 6e-12, because
+      the 7,527-point neighbourhood gives R's kd-tree plenty to work with. The
+      bounds are fitted to .low/.high, which are step-like in .mean, so R's
+      interpolation error shows more: worst 1.7e-3 relative, which is
+      **0.072 ug/m3** -- about 3% of the ~2.4 ug/m3 (10%) measurement error on
+      a diffusion tube. The .pc columns divide that by ans, reaching 1.4e-2
+      relative or 0.14 percentage points. Bounds set with headroom over the
+      observed values; everything else in these cases, including .n, .mean,
+      .sd, .low, .high and the report string, is held to the 1e-6 default.
     label_columns: [".sample_id"]
     label_reason: >-
       .sample_id numbers replicate sets. R derives its integers by pasting the
@@ -227,6 +284,25 @@ cases:
   - id: precision/method4
     r: testTubePrecision(dt.brd, method = 4, show = character(0))
     py: dte.test_tube_precision(dte.datasets.dt_brd(), method=4, show=[])
+    tol_columns:
+      ".ylow": 1.0e-2
+      ".yhigh": 1.0e-2
+      "low": 1.0e-2
+      "high": 1.0e-2
+      "low.pc": 1.0e-1
+      "high.pc": 1.0e-1
+    reason: >-
+      The LOESS confidence bounds only. R fits with surface="interpolate", a
+      kd-tree approximation; we compute the exact local regression (see
+      dteval.loess). For the central fit (.y) the two agree to 6e-12, because
+      the 7,527-point neighbourhood gives R's kd-tree plenty to work with. The
+      bounds are fitted to .low/.high, which are step-like in .mean, so R's
+      interpolation error shows more: worst 1.7e-3 relative, which is
+      **0.072 ug/m3** -- about 3% of the ~2.4 ug/m3 (10%) measurement error on
+      a diffusion tube. The .pc columns divide that by ans, reaching 1.4e-2
+      relative or 0.14 percentage points. Bounds set with headroom over the
+      observed values; everything else in these cases, including .n, .mean,
+      .sd, .low, .high and the report string, is held to the 1e-6 default.
     label_columns: [".sample_id"]
     label_reason: >-
       .sample_id numbers replicate sets. R derives its integers by pasting the
@@ -243,6 +319,25 @@ cases:
     py: dte.test_tube_precision(dte.datasets.dt_brd(), facet=".year", show=[])
 
   # --- deseason -------------------------------------------------------------
+    tol_columns:
+      ".ylow": 1.0e-2
+      ".yhigh": 1.0e-2
+      "low": 1.0e-2
+      "high": 1.0e-2
+      "low.pc": 1.0e-1
+      "high.pc": 1.0e-1
+    reason: >-
+      The LOESS confidence bounds only. R fits with surface="interpolate", a
+      kd-tree approximation; we compute the exact local regression (see
+      dteval.loess). For the central fit (.y) the two agree to 6e-12, because
+      the 7,527-point neighbourhood gives R's kd-tree plenty to work with. The
+      bounds are fitted to .low/.high, which are step-like in .mean, so R's
+      interpolation error shows more: worst 1.7e-3 relative, which is
+      **0.072 ug/m3** -- about 3% of the ~2.4 ug/m3 (10%) measurement error on
+      a diffusion tube. The .pc columns divide that by ans, reaching 1.4e-2
+      relative or 0.14 percentage points. Bounds set with headroom over the
+      observed values; everything else in these cases, including .n, .mean,
+      .sd, .low, .high and the report string, is held to the 1e-6 default.
     label_columns: [".sample_id"]
     label_reason: >-
       .sample_id numbers replicate sets. R derives its integers by pasting the

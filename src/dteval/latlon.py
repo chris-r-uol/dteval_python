@@ -141,8 +141,14 @@ def _as_polygon(geom):
 
 def _within(lons, lats, geoms) -> list[int | None]:
     """``sf::st_within`` -- index of the containing polygon, or None."""
-    from shapely.geometry import Point
-    from shapely.prepared import prep
+    try:
+        from shapely.geometry import Point
+        from shapely.prepared import prep
+    except ImportError as exc:  # pragma: no cover - depends on the install
+        raise ImportError(
+            "tube_in_xy_polygon needs shapely. Install it with: "
+            "pip install 'dteval[geo]'"
+        ) from exc
 
     prepared = [prep(g) for g in geoms]
     out: list[int | None] = []

@@ -115,7 +115,13 @@ def tube_summary_lat_lon(
     ``output='report'`` / ``'full.report'`` returns the ranked table; otherwise
     a banded count, as R's ``summary(cut(...))``.
     """
-    from aqeval import find_near_lat_lon
+    try:
+        from aqeval import find_near_lat_lon
+    except ImportError as exc:  # pragma: no cover - depends on the install
+        raise ImportError(
+            "tube_summary_lat_lon needs the aqeval package. Install it with: "
+            "pip install 'dteval[aqeval]'"
+        ) from exc
 
     d2 = tag_tube(data, **kwargs)
 

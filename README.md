@@ -85,9 +85,9 @@ git diff --exit-code parity/fixtures/
 
 ## Known parity gaps
 
-Three areas cannot be reproduced bit-exactly in pure Python; they are documented
-in [`docs/parity.md`](docs/parity.md), marked non-gating in the manifest, and
-their measured deviation is tracked so it cannot drift unnoticed:
+Two functions diverge from R, both documented in
+[`docs/parity.md`](docs/parity.md), marked non-gating in the manifest, and with
+their measured deviation pinned by tests so it cannot drift unnoticed:
 
 | Area | Reason |
 |---|---|

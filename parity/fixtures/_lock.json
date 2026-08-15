@@ -9,7 +9,8 @@
   "locale": {
     "LC_COLLATE": "C",
     "LC_TIME": "C",
-    "LC_NUMERIC": "C"
+    "LC_NUMERIC": "C",
+    "LC_CTYPE": "UTF-8"
   },
   "relaxed_imports": [],
   "shims": {

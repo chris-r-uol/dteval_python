@@ -17,6 +17,7 @@
 # Usage:  Rscript tools/export_datasets.R
 
 invisible(Sys.setlocale("LC_COLLATE", "C"))
+source("parity/ctype.R"); dte_pin_ctype()
 invisible(Sys.setlocale("LC_TIME", "C"))
 suppressPackageStartupMessages(library(jsonlite))
 

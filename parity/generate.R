@@ -19,6 +19,7 @@ suppressPackageStartupMessages({
 })
 
 invisible(Sys.setlocale("LC_COLLATE", "C"))
+source("parity/ctype.R"); dte_pin_ctype()
 invisible(Sys.setlocale("LC_TIME", "C"))
 invisible(Sys.setlocale("LC_NUMERIC", "C"))
 options(stringsAsFactors = FALSE, warn = 1)

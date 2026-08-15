@@ -108,6 +108,8 @@ def compare_nodes(
         if len(exp) != len(got):
             rep.add(path, f"length {len(got)}, expected {len(exp)}")
             return
+        if compare_numeric_list(exp, got, path, rep, tol):
+            return
         for i, (a, b) in enumerate(zip(exp, got, strict=True)):
             compare_nodes(a, b, f"{path}[{i}]", rep, tol, case)
         return
@@ -121,6 +123,48 @@ def compare_nodes(
 
     if exp != got:
         rep.add(path, f"expected {exp!r}, got {got!r}")
+
+
+#: A difference below this many ulps of an array's own scale is floating-point
+#: noise, not information. R's `cor` returns exactly 1 for a perfectly
+#: correlated pair on one platform and 1 - eps/2 on another, so `1 - cor` is 0
+#: against 1.1e-16 -- infinitely far apart under a purely *relative* tolerance,
+#: and identical for every purpose. Eight ulps leaves room for a two-pass
+#: correlation to accumulate rounding while staying far tighter than the tests
+#: that consume these blocks (test_cluster.py asks for 1e-12 absolute on a
+#: matrix whose largest element is 2; eight ulps of 2 is 1.8e-15).
+NOISE_ULPS = 8
+
+
+def compare_numeric_list(
+    exp: list, got: list, path: str, rep: Report, tol: float
+) -> bool:
+    """Compare two lists of serialised doubles. Returns False if they are not.
+
+    Scale matters here: these are bare %.17g character vectors, so unlike a
+    serialised column they carry no dtype, and a purely relative comparison
+    breaks down for the elements near zero.
+    """
+    try:
+        exp_values = [float(v) for v in exp]
+        got_values = [float(v) for v in got]
+    except (TypeError, ValueError):
+        return False
+    if any(v in SPECIAL_TOKENS for v in exp) or any(v in SPECIAL_TOKENS for v in got):
+        return False
+
+    finite = [abs(v) for v in exp_values + got_values if math.isfinite(v)]
+    floor = max(finite, default=0.0) * NOISE_ULPS * 2.0**-52
+
+    for i, (a, b) in enumerate(zip(exp_values, got_values, strict=True)):
+        if math.isnan(a) or math.isnan(b) or math.isinf(a) or math.isinf(b):
+            if exp[i] != got[i]:
+                rep.add(f"{path}[{i}]", f"expected {exp[i]!r}, got {got[i]!r}")
+            continue
+        if abs(a - b) <= max(tol * max(abs(a), abs(b)), floor):
+            continue
+        rep.add(f"{path}[{i}]", f"expected {exp[i]!r}, got {got[i]!r}")
+    return True
 
 
 def numeric_strings_agree(exp: str, got: str, tol: float) -> bool | None:

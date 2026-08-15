@@ -135,3 +135,41 @@ def test_non_gating_cases_are_skipped_not_compared():
     cases = load_cases()
     non_gating = [n for n, c in cases.items() if c.get("gating", True) is False]
     assert "deseason__method1.location.json.gz" in non_gating
+
+
+def _numeric_list_report(exp, got, tol=DEFAULT_TOL) -> Report:
+    rep = Report("test")
+    compare_nodes(exp, got, "$", rep, tol)
+    return rep
+
+
+def test_a_near_zero_difference_is_noise_not_information():
+    """R's cor() returns exactly 1 for a perfect correlation on one platform
+    and 1 - eps/2 on another, so 1 - cor is 0 against 1.1e-16. A purely
+    relative tolerance puts those infinitely far apart."""
+    exp = ["2", "1.5", "1.1102230246251565e-16"]
+    got = ["2", "1.5", "0"]
+    assert _numeric_list_report(exp, got).ok
+
+
+def test_the_noise_floor_stays_tighter_than_the_consuming_test():
+    """test_cluster.py accepts 1e-12 absolute on this matrix, so the gate must
+    reject anything at that size or the gate is the weaker of the two."""
+    exp = ["2", "1.5", "1e-12"]
+    got = ["2", "1.5", "0"]
+    assert not _numeric_list_report(exp, got).ok
+
+
+def test_the_noise_floor_scales_with_the_array():
+    """Eight ulps of the array's own maximum, not a fixed constant."""
+    small = _numeric_list_report(["1e-6", "1e-22"], ["1e-6", "0"])
+    assert small.ok, "1e-22 is noise beside 1e-6"
+    assert not _numeric_list_report(["1e-6", "1e-12"], ["1e-6", "0"]).ok
+
+
+def test_a_real_difference_in_a_numeric_list_still_fails():
+    assert not _numeric_list_report(["1.0", "2.0"], ["1.0", "2.5"]).ok
+
+
+def test_a_list_of_non_numeric_strings_stays_exact():
+    assert not _numeric_list_report(["Bradford", "Leeds"], ["Bradford", "York"]).ok

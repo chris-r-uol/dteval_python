@@ -582,3 +582,19 @@ cases:
   - id: plot/testTubeMeta.type1
     r: 'testTubeMeta(dt.brd, plot.type = 1)'
     py: 'dte.test_tube_meta(dte.datasets.dt_brd(), plot_type=1)'
+
+  # --- fitted surface with too.far masking ------------------------------------
+  - id: fit/loess.surface.too.far
+    r: 'fitTubeModel(dt.brd, tube = ".value", inputs = c(".longitude", ".latitude"), new.data = "input.ranges", simplify = TRUE, grid.resolution = 40, too.far = 0.08)'
+    py: 'dte.fit_tube_model(dte.datasets.dt_brd(), tube=".value", inputs=[".longitude", ".latitude"], new_data="input.ranges", simplify=True, grid_resolution=40, too_far=0.08)'
+    tol_columns:
+      ".value.pred.se": 1.0e-2
+    reason: >-
+      Gates exclude_too_far against mgcv::exclude.too.far, which is what R uses
+      for two inputs. The masked cells must be exactly the same cells -- a node
+      kept here but dropped in R is a patch of map claiming to be a measurement
+      -- and they are: .value.pred, NAs included, matches at the 1e-6 default.
+
+      .value.pred.se carries the same 1e-2 bound as fit/loess.latlon.by.year and
+      for the same reason: R's approximate delta1 from the Fortran lowesa/ehg141
+      against our exact hat matrix. On this grid that lands 1.1e-3 relative.

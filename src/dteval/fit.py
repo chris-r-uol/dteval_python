@@ -19,7 +19,7 @@ from dteval.loess import r_loess
 from dteval.rcompat.stats import r_mean
 from dteval.tagging import tag_tube_required
 
-__all__ = ["fit_tube_model", "fit_tube_model_gam", "fit_tube_model_loess"]
+__all__ = ["exclude_too_far", "fit_tube_model", "fit_tube_model_gam", "fit_tube_model_loess"]
 
 
 def fit_tube_model_loess(
@@ -162,6 +162,15 @@ def fit_tube_model(
         out = out.rename(columns={"..pred": f"{tube}.pred"})
         for col in [*by_cols, "..index"]:
             out[col] = chunk[col].iloc[0]
+
+        too_far = _kwarg(kwargs, "too.far")
+        if too_far is not None and grid is not None:
+            # R blanks the prediction rather than dropping the row, so the grid
+            # stays rectangular and the gap renders as a hole in the surface.
+            excluded = exclude_too_far(
+                out[inputs].to_numpy(), chunk[inputs].to_numpy(), float(too_far)
+            )
+            out.loc[excluded, f"{tube}.pred"] = np.nan
         results.append(out)
 
     if not results:
@@ -180,6 +189,57 @@ def fit_tube_model(
     return ans.rename(
         columns={"..pred": f"{tube}.pred", "..pred.se": f"{tube}.pred.se"}
     )
+
+
+def _kwarg(kwargs: dict, dotted: str, default=None):
+    """Read a keyword under either spelling.
+
+    R's argument is ``grid.resolution``; a Python caller reasonably writes
+    ``grid_resolution``. Both work, because silently ignoring the pythonic one
+    is worse than accepting two spellings -- it produced a full-extent surface
+    when a masked one was asked for.
+    """
+    if dotted in kwargs:
+        return kwargs[dotted]
+    return kwargs.get(dotted.replace(".", "_"), default)
+
+
+def exclude_too_far(grid, data, dist: float) -> np.ndarray:
+    """Which grid nodes sit further than ``dist`` from any observation?
+
+    Port of ``mgcv::exclude.too.far`` (which DTEval uses for two inputs) and of
+    ``dte_too.far`` (its generalisation to more). The two agree: both rescale
+    every axis onto the *grid's* own [0, 1] range, then take each node's
+    Euclidean distance to the nearest observation and flag it when that exceeds
+    ``dist``.
+
+    This is what keeps a fitted surface honest. Without it the model
+    extrapolates confidently across areas that hold no tubes at all, which on a
+    concentration map reads as measurement rather than guesswork.
+    """
+    grid = np.asarray(grid, dtype="float64")
+    data = np.asarray(data, dtype="float64")
+    if grid.ndim == 1:
+        grid = grid.reshape(-1, 1)
+        data = data.reshape(-1, 1)
+
+    scaled_grid = np.empty_like(grid)
+    scaled_data = np.empty_like(data)
+    for axis in range(grid.shape[1]):
+        low = np.nanmin(grid[:, axis])
+        span = np.nanmax(grid[:, axis]) - low
+        span = span if span else 1.0
+        scaled_grid[:, axis] = (grid[:, axis] - low) / span
+        scaled_data[:, axis] = (data[:, axis] - low) / span
+
+    keep = ~np.isnan(scaled_data).any(axis=1)
+    if not keep.any():
+        return np.ones(len(grid), dtype=bool)
+
+    from scipy.spatial import cKDTree
+
+    nearest, _ = cKDTree(scaled_data[keep]).query(scaled_grid, k=1)
+    return nearest > dist
 
 
 def _new_data_grid(new_data, d2: pd.DataFrame, inputs: list[str], kwargs: dict):
@@ -201,8 +261,8 @@ def _new_data_grid(new_data, d2: pd.DataFrame, inputs: list[str], kwargs: dict):
         )
         return None
 
-    resolution = int(kwargs.get("grid.resolution", 100))
-    borders = kwargs.get("grid.borders")
+    resolution = int(_kwarg(kwargs, "grid.resolution", 100))
+    borders = _kwarg(kwargs, "grid.borders")
     axes = []
     for name in inputs:
         values = d2[name].to_numpy(dtype="float64")

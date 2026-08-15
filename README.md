@@ -33,13 +33,16 @@ Output conventions follow the R package: tagged column names (`.value`,
 
 ```bash
 pip install dteval            # core: numpy, pandas, scipy
-pip install "dteval[all]"     # + shapely, aqeval, plotnine
+pip install "dteval[all]"     # + shapely, aqeval, plotnine, OSM basemaps
 ```
 
 The core install has no compiled dependency beyond numpy/pandas/scipy and can
 run every analysis in the package. Optional extras cover point-in-polygon
-(`geo`), nearest-site distances (`aqeval`) and server-side figure rendering
-(`plots`); calling something without its extra tells you which to install. See
+(`geo`), nearest-site distances (`aqeval`), server-side figure rendering
+(`plots`) and OpenStreetMap basemaps (`basemap`); calling something without its
+extra tells you which to install. The Web Mercator helpers in
+`dteval.plots.basemap` need no extra — anything drawing tube coordinates onto
+map tiles has to project first, in Python or in the browser. See
 [`docs/backend.md`](docs/backend.md) if you are deploying this behind an API.
 
 ## Quick start

@@ -102,7 +102,43 @@ spec["limits"]     # {".longitude": [lo, hi], ".latitude": [lo, hi]}
 spec["blank_axes"] # True -- a map has no axis furniture
 ```
 
-Point your tile layer at `bbox` and draw the layers over it.
+Point your tile layer at `bbox` and draw the layers over it — but **project
+first**. Web Mercator tiles (OSM, Mapbox, Esri) are in EPSG:3857 while every
+coordinate in the spec is longitude/latitude in degrees. Plotting degrees
+directly onto Mercator tiles misplaces the data *subtly* rather than obviously,
+which is the version nobody catches in review: at Bradford's latitude the
+error grows to hundreds of metres towards the top of the frame.
+
+Leaflet and MapLibre project for you if you hand them `[lat, lng]` and let them
+place the markers. If you are drawing to a canvas or an SVG overlay yourself,
+do the transform explicitly. The same maths the package uses server-side is
+exported for reference:
+
+```python
+from dteval.plots import to_mercator, from_mercator
+
+x, y = to_mercator(spec["limits"][".longitude"], spec["limits"][".latitude"])
+```
+
+Mercator also stretches latitude non-linearly, so a surface grid that is
+evenly spaced in degrees is *not* evenly spaced once projected. Project the
+grid's coordinates rather than projecting two corners and interpolating
+between them.
+
+To render a map server-side instead, `dteval[basemap]` adds OSM tile fetching:
+
+```python
+from dteval.plots import attribute, fetch_basemap
+
+image, extent = fetch_basemap((west, south, east, north))   # extent in metres
+ax.imshow(image, extent=extent)
+attribute(ax)          # required: OSM data is ODbL
+```
+
+Tiles are cached under `~/.cache/dteval/tiles` (override with
+`DTEVAL_TILE_CACHE`), requests are spaced and identify themselves, and the zoom
+is capped by tile count — OSM's tile policy asks for all three. Whatever draws
+the tiles, the attribution is not optional.
 
 `leaflet_tube_map` returns a `LeafletMap`, which is an ordered list of leaflet
 calls — feed it straight to leaflet.js, or translate the four methods to

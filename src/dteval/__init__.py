@@ -18,6 +18,7 @@ __version__ = "0.1.1.3"
 from dteval import datasets, plots, rcompat
 from dteval.annual import tube_annual_cover
 from dteval.calc import calc_tube_stat
+from dteval.fit import fit_tube_model, fit_tube_model_loess
 from dteval.handlers import DTEvalError, check_tube_data, get_tube_x
 from dteval.latlon import tube_in_xy_polygon
 from dteval.loess import r_loess
@@ -44,6 +45,8 @@ __all__ = [
     "check_tube_data",
     "datasets",
     "TubePlot",
+    "fit_tube_model",
+    "fit_tube_model_loess",
     "get_tube_x",
     "plots",
     "r_loess",

@@ -198,6 +198,44 @@ disagreement of 6.5e-10 m over 1,884 real site pairs. The fix
 **This tolerance should be deleted once that fix is installed**, at which point
 the case is bit-exact. Row order and every other column already are.
 
+### LOESS — three different situations
+
+R's `stats::loess` wraps netlib's `dloess`. What the port can guarantee depends
+on the number of predictors and the surface.
+
+| case | used by | status |
+|---|---|---|
+| 1 predictor, either surface | `testTubePrecision` | `scikit-misc` (same `dloess`), ~10 ulps |
+| ≥2 predictors, `surface="direct"` | `fitTubeModel_loess` | native, **2.9e-13** relative |
+| ≥2 predictors, `surface="interpolate"` | `deseasonTubeData` | **not available** — raises |
+
+**`scikit-misc` 0.5.2's multivariate LOESS does not fit correctly.** With
+`y = u` exactly (noiseless) and an irrelevant second predictor `v`: one
+predictor recovers `y` to 1e-13; two predictors return a near-constant (fitted
+sd 5.6 against `y`'s 30.1, worst error 60 over a range of 100), for both
+surfaces. Against R on a smooth surface the relative error reaches 2.6. So
+`r_loess` **raises** for the multivariate interpolating case rather than
+returning plausible-looking wrong numbers, which would corrupt
+`deseasonTubeData` while looking fine.
+
+`surface="direct"` is implemented natively in `dteval._loess_direct` — plain
+tricube-weighted local polynomial regression, no kd-tree — and reproduces R's
+fitted values to a few ulps.
+
+#### `se.fit` is the weak spot
+
+R scales the standard error by a residual scale derived from an *approximate*
+`delta1` (`statistics = "1.approx"`), computed by the Fortran `lowesa` →
+`ehg141`, which evaluates a hard-coded spline via `ehg128` — 339 lines of
+tensor-product blending. We use the exact hat matrix instead, landing **2.7e-3
+relative** from R.
+
+At that bound, `.value.pred.se` is a *structural* check rather than a numeric
+one. The fitted values are unaffected. Porting `ehg141`/`ehg176`/`ehg128` would
+fix it — and since `ehg128` is the same kd-tree interpolator the
+`surface="interpolate"` path needs, it would unblock `deseasonTubeData` too.
+That is the single highest-value remaining piece of numerical work.
+
 ### `fit_tube_model_gam` — not bit-exact
 
 `mgcv::gam` with `te()` tensor smooths and GCV/REML smoothing-parameter

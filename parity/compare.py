@@ -146,13 +146,27 @@ def compare_series(
         rep.add(path, f"... {bad} differing values in total")
 
 
+def _tol_for(column: str, tol: float | None, tol_columns) -> float | None:
+    """Resolve the tolerance for one column.
+
+    ``tol_columns`` may be a list -- every named column gets ``tol`` -- or a
+    mapping, when different columns need different bounds (a LOESS fit and its
+    standard error, say). Columns not named are compared exactly.
+    """
+    if tol_columns is None:
+        return tol
+    if isinstance(tol_columns, dict):
+        return tol_columns.get(column)
+    return tol if column in tol_columns else None
+
+
 def compare_frame(
     exp: pd.DataFrame,
     got: Any,
     path: str,
     rep: Report,
     tol: float | None,
-    tol_columns: set[str] | None = None,
+    tol_columns: dict[str, float] | set[str] | None = None,
 ) -> None:
     if not isinstance(got, pd.DataFrame):
         rep.add(path, f"expected a DataFrame, got {type(got).__name__}")
@@ -177,7 +191,7 @@ def compare_frame(
         # A tolerance applies only to the columns the manifest names. Everything
         # else stays bit-exact, so loosening one LOESS-derived column cannot
         # quietly loosen the counts and means beside it.
-        col_tol = tol if (tol_columns is None or col in tol_columns) else None
+        col_tol = _tol_for(col, tol, tol_columns)
         compare_series(exp[col], got[col], f"{path}[{col!r}]", rep, col_tol)
 
 
@@ -290,7 +304,7 @@ def compare(
     got: Any,
     fixture: dict,
     tol: float | None = None,
-    tol_columns: list[str] | None = None,
+    tol_columns: list[str] | dict[str, float] | None = None,
     row_order_artifact: list[str] | None = None,
 ) -> Report:
     """Compare a Python result against a loaded fixture payload.
@@ -301,7 +315,9 @@ def compare(
     """
     rep = Report(case_id)
     node = fixture["value"]
-    cols = set(tol_columns) if tol_columns else None
+    cols = None
+    if tol_columns:
+        cols = dict(tol_columns) if isinstance(tol_columns, dict) else set(tol_columns)
 
     if node["type"] == "ggplot":
         compare_ggplot(node, got, "$", rep, tol, cols)

@@ -55,6 +55,36 @@ class MultivariateLoessUnavailable(NotImplementedError):
     """
 
 
+class _DirectModel:
+    """Adapter giving the native direct-surface fit the same predict() shape."""
+
+    __slots__ = ("x", "y", "span", "degree", "normalize")
+
+    def __init__(self, x, y, span, degree, normalize):
+        self.x, self.y = x, y
+        self.span, self.degree, self.normalize = span, degree, normalize
+
+    def predict(self, newdata, stderror: bool = False):
+        from dteval._loess_direct import loess_direct
+
+        nd = None if newdata is None else np.asarray(newdata, dtype="float64")
+        out = loess_direct(
+            self.x, self.y, nd, span=self.span, degree=self.degree,
+            normalize=self.normalize, se=stderror,
+        )
+        if stderror:
+            values, stderr = out
+            return _Prediction(values, stderr)
+        return _Prediction(out, None)
+
+
+class _Prediction:
+    __slots__ = ("values", "stderr")
+
+    def __init__(self, values, stderr):
+        self.values, self.stderr = values, stderr
+
+
 @dataclass
 class LoessFit:
     """A fitted LOESS model, mirroring what R's ``loess`` object provides."""
@@ -90,6 +120,8 @@ class LoessFit:
                     f"newdata has {xs.shape[1]} predictor(s), model has {self.x.shape[1]}"
                 )
         flat = xs[:, 0] if xs.shape[1] == 1 else xs
+        if isinstance(self._model, _DirectModel) and newdata is None:
+            flat = None
         out = self._model.predict(flat, stderror=se)
         values = np.asarray(out.values, dtype="float64")
         if se:
@@ -141,16 +173,25 @@ def r_loess(
     if xs.shape[0] != ys.shape[0]:
         raise ValueError(f"x has {xs.shape[0]} rows, y has {ys.shape[0]}")
 
-    if xs.shape[1] > 1:
+    if xs.shape[1] > 1 and surface != "direct":
         raise MultivariateLoessUnavailable(
-            f"LOESS with {xs.shape[1]} predictors is not available: "
-            "scikit-misc 0.5.2's multivariate fit does not reproduce R "
-            "(see MultivariateLoessUnavailable for the measured reproducer)."
+            f"LOESS with {xs.shape[1]} predictors and surface={surface!r} is not "
+            "available: scikit-misc 0.5.2's multivariate fit does not reproduce R "
+            "(see MultivariateLoessUnavailable), and the interpolating surface "
+            "needs R's ehg128 kd-tree, which is not ported. surface='direct' is "
+            "implemented natively in dteval._loess_direct."
         )
 
     keep = ~(np.isnan(ys) | np.any(np.isnan(xs), axis=1))
     used_index = np.flatnonzero(keep)
     xs_fit, ys_fit = xs[keep], ys[keep]
+
+    if xs.shape[1] > 1:
+        return LoessFit(
+            x=xs_fit, y=ys_fit, span=span, degree=degree, family=family,
+            surface=surface, used_index=used_index,
+            _model=_DirectModel(xs_fit, ys_fit, span, degree, normalize),
+        )
 
     model = _skloess(
         xs_fit[:, 0],

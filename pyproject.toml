@@ -93,5 +93,3 @@ ignore = ["E501"]
 "dteval.test_tube_accuracy".msg = "import the module and call dteval.test_tube_accuracy(...) — a bare import is collected by pytest as a test"
 "dteval.test_tube_meta".msg = "import the module and call dteval.test_tube_meta(...) — a bare import is collected by pytest as a test"
 
-[tool.hatch.build.targets.wheel.force-include]
-"src/dteval/data" = "dteval/data"
